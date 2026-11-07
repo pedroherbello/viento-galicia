@@ -14,9 +14,10 @@ const BASE = process.env.MG_BASE || "https://servizos.meteogalicia.gal/mgrss/obs
 const URL10 = `${BASE}/ultimos10minEstacionsMeteo.action?idEst=${IDS}`;
 const URLH = `${BASE}/ultimosHorariosEstacions.action?idEst=${IDS}&numHoras=48`;
 
-const KEEP_10MIN_H = 7 * 24;   // horas de lecturas de 10 min que se conservan
+const KEEP_10MIN_H = 50;       // horas de lecturas de 10 min que se conservan (la web muestra 48)
 const KEEP_HOURLY_H = 50;      // horas de histórico horario
 const HOURLY_EVERY_MIN = 30;   // cada cuánto se vuelve a pedir el histórico horario
+const FAIL_AFTER_H = 2;        // la ejecución solo falla (y GitHub avisa) si no hay lecturas nuevas en este tiempo
 
 const file = process.argv[2];
 if (!file) { console.error("Falta la ruta de spots.json"); process.exit(2); }
@@ -50,15 +51,19 @@ async function getJSON(url, key) {
 }
 
 let data = { spots: {} };
-try {
-  const txt = await readFile(file, "utf8");
+let txt = null;
+try { txt = await readFile(file, "utf8"); }
+catch (e) { if (e.code !== "ENOENT") throw e; /* primera ejecución */ }
+if (txt != null) {
+  // Un archivo dañado nunca se trata como primera ejecución: se borraría el historial.
   const j = JSON.parse(txt);
-  if (j && typeof j.spots === "object") data = j;
-} catch { /* primera ejecución */ }
+  if (!j || typeof j.spots !== "object") throw new Error("spots.json no tiene el formato esperado");
+  data = j;
+}
 const before = JSON.stringify(data.spots);
 
-const oldestHAt = Math.min(...SPOTS.map((s) => Date.parse(data.spots[s.id]?.hAt || "") || 0));
-const needHourly = process.env.FORCE_HOURLY === "1" || now - oldestHAt > HOURLY_EVERY_MIN * 60e3;
+const lastHourly = Date.parse(data.hAt || "") || 0;
+const needHourly = process.env.FORCE_HOURLY === "1" || now - lastHourly >= (HOURLY_EVERY_MIN - 2) * 60e3;
 
 let j10 = null, jh = null;
 const errors = [];
@@ -77,16 +82,18 @@ for (const s of SPOTS) {
     g: pick(u0.listaMedidas, "VV_RACHA_10m"),
     d: pick(u0.listaMedidas, "DV_AVG_10m"),
   } : null;
-  const u = u1 && isFinite(parseUTC(u1.t)) && (!prev.u || u1.t >= prev.u.t) ? u1 : prev.u || null;
+  // Se descartan lecturas sin valores, con fecha imposible o futura.
+  const ok1 = u1 && isFinite(parseUTC(u1.t)) && parseUTC(u1.t) <= now + 20 * 60e3 && (u1.vv != null || u1.g != null);
+  const u = ok1 && (!prev.u || u1.t >= prev.u.t) ? u1 : prev.u || null;
 
   const dm = new Map((prev.diez || []).map((o) => [o.t, o]));
-  if (u1 && isFinite(parseUTC(u1.t)) && (u1.vv != null || u1.g != null)) dm.set(u1.t, u1);
-  const diez = [...dm.values()].filter((o) => parseUTC(o.t) >= cut10).sort(byT);
+  if (ok1) dm.set(u1.t, u1);
+  const diez = [...dm.values()].filter((o) => parseUTC(o.t) >= cut10 && parseUTC(o.t) <= now + 20 * 60e3).sort(byT);
 
   const hm = new Map((prev.h || []).map((o) => [o.t, o]));
   for (const i of h0?.listaInstantes || []) {
     const t = String(i.instanteLecturaUTC || "").slice(0, 16);
-    if (!isFinite(parseUTC(t))) continue;
+    if (!isFinite(parseUTC(t)) || parseUTC(t) > now + 20 * 60e3) continue;
     const old = hm.get(t) || {};
     hm.set(t, { t, d: pick(i.listaMedidas, "DV_AVG_10m") ?? old.d ?? null, g: pick(i.listaMedidas, "VV_RACHA_10m") ?? old.g ?? null });
   }
@@ -94,8 +101,9 @@ for (const s of SPOTS) {
 
   data.spots[s.id] = { id: s.id, nombre: s.nombre, u, h, diez, hAt: h0 ? new Date(now).toISOString() : prev.hAt || null };
 }
+if (jh) data.hAt = new Date(now).toISOString();
 
-const changed = JSON.stringify(data.spots) !== before;
+const changed = JSON.stringify(data.spots) !== before || Boolean(jh);
 if (changed) {
   data.actualizado = new Date(now).toISOString();
   await writeFile(file, JSON.stringify(data));
@@ -103,8 +111,11 @@ if (changed) {
 }
 const n = SPOTS.map((s) => `${s.id}:${data.spots[s.id].u?.t || "-"}(${data.spots[s.id].diez.length})`).join(" ");
 console.log(`${changed ? "Actualizado" : "Sin cambios"} · ${n}${needHourly ? " · horario pedido" : ""}`);
-if (errors.length) {
-  console.error("Errores:", errors.join(" | "));
-  // Falla solo si no se pudo leer nada; así GitHub avisa si MeteoGalicia deja de responder.
-  if (!j10 && !jh) process.exit(1);
+if (errors.length) console.error("Errores:", errors.join(" | "));
+// La ejecución falla (y GitHub avisa por correo) solo si llevamos más de FAIL_AFTER_H horas
+// sin lecturas nuevas, para no mandar un correo cada 5 minutos durante un corte breve.
+const newest = Math.max(0, ...SPOTS.map((s) => parseUTC(data.spots[s.id].u?.t || "") || 0));
+if (!j10 && now - newest > FAIL_AFTER_H * 3600e3) {
+  console.error(`Sin lecturas nuevas desde hace más de ${FAIL_AFTER_H} h.`);
+  process.exit(1);
 }

@@ -4,11 +4,13 @@ on:
   schedule:
     # MeteoGalicia publica una lectura cada 10 min. Se consulta cada 5 min
     # porque GitHub a veces retrasa las tareas programadas.
-    - cron: "*/5 * * * *"
+    # Minutos 3, 8, 13… para evitar el pico de las horas en punto.
+    - cron: "3-58/5 * * * *"
   workflow_dispatch:
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: recoger-viento
@@ -28,8 +30,17 @@ jobs:
       - name: Cargar datos guardados (rama data)
         run: |
           mkdir -p out
-          if git fetch --quiet --depth=1 origin data; then
-            git show FETCH_HEAD:spots.json > out/spots.json || rm -f out/spots.json
+          # Si la rama no existe (código 2) es la primera ejecución. Cualquier otro
+          # error detiene la ejecución: nunca se publica sobre un historial que no se ha podido leer.
+          set +e
+          git ls-remote --exit-code --heads origin data > /dev/null
+          rc=$?
+          set -e
+          if [ "$rc" -eq 0 ]; then
+            git fetch --quiet --depth=1 origin data
+            git show FETCH_HEAD:spots.json > out/spots.json
+          elif [ "$rc" -ne 2 ]; then
+            echo "No se pudo consultar la rama data (código $rc)"; exit 1
           fi
 
       - name: Leer MeteoGalicia
@@ -49,3 +60,10 @@ jobs:
           git commit --quiet -m "Lecturas $(date -u +%Y-%m-%dT%H:%MZ)"
           # Un único commit, reemplazado cada vez, para que el repositorio no crezca.
           git push --quiet --force "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" data
+
+      - name: Mantener activa la tarea programada
+        # GitHub desactiva las tareas programadas de repositorios públicos tras 60 días sin actividad.
+        if: ${{ github.event_name == 'schedule' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh api -X PUT "repos/${GITHUB_REPOSITORY}/actions/workflows/collect.yml/enable" > /dev/null || true

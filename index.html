@@ -213,7 +213,8 @@ const DATA_URL = (() => {
   const host = location.hostname, m = /^([^.]+)\.github\.io$/i.exec(host);
   const repo = location.pathname.split("/").filter(Boolean)[0];
   if(m && repo) return `https://raw.githubusercontent.com/${m[1]}/${repo}/data/spots.json`;
-  return "data/spots.json";
+  // Dominio propio u otro alojamiento: repositorio fijo.
+  return "https://raw.githubusercontent.com/pedroherbello/viento-galicia/data/spots.json";
 })();
 const POLL = 2*60e3;          // reload the data file this often while the page is visible
 
@@ -385,7 +386,7 @@ function drawChart(s, doc){
   const HGT = narrow ? 230 : 270;
   const pl = 28, pr = 6, pt = narrow ? 28 : 32, pb = 34;
   const iw = W-pl-pr, ih = HGT-pt-pb;
-  const tMax = Math.max(H.length?H[H.length-1].t:0, M.length?M[M.length-1].t:0);
+  const tMax = Math.min(Date.now(), Math.max(H.length?H[H.length-1].t:0, M.length?M[M.length-1].t:0));
   const tMin = tMax - 48*3600e3;
   const visM = M.filter(o=>o.t>tMin);
   // hours that the 10-min series covers well (≥ 3 readings) don't need the hourly fallback
@@ -510,7 +511,7 @@ function renderStamp(){
   const st = $("#stamp");
   if(!state.loaded){ st.textContent = ""; return; }
   const t = newestT(), o = oldestT();
-  if(!t){ st.textContent = "Todavía no hay lecturas recogidas."; return; }
+  if(!t){ st.textContent = Object.keys(state.docs).length ? "Todavía no hay lecturas de 10 minutos; se muestra la racha máxima de cada hora." : "Todavía no hay lecturas recogidas."; return; }
   let html = `<span class="dot" aria-hidden="true"></span>Última lectura <b class="mono">${fmtHM.format(t)}</b> · ${ago(t)}. Se recogen solas cada 10 min.`;
   if(Date.now()-t > 40*60e3) html += `<br><span class="warn">No hay lecturas nuevas desde las ${fmtHM.format(t)}. MeteoGalicia o la recogida automática pueden estar parados.</span>`;
   else if(o && Date.now()-o > 40*60e3) html += `<br><span class="warn">Alguna estación no envía datos desde las ${fmtHM.format(o)}.</span>`;
