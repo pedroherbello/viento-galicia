@@ -103,7 +103,18 @@ button{font:inherit;color:inherit}
 .chart-wrap{position:relative;min-width:0}
 .chart-title{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:8px 18px;margin-bottom:8px}
 .chart-title h3{margin:0;font-size:14px;font-weight:700}
-.chart-title h3 span{color:var(--muted);font-weight:400}
+.chart-title h3 .subt{color:var(--muted);font-weight:400}
+.chart-title{align-items:center}
+.legend{margin:0 0 6px}
+.zoom{display:inline-flex;gap:2px;padding:2px;border:1px solid var(--line);border-radius:999px;background:var(--bg)}
+.zoom button{appearance:none;border:0;background:transparent;color:var(--muted);font:500 12px/1 var(--f-mono);padding:7px 11px;border-radius:999px;cursor:pointer;min-height:30px;font-variant-numeric:tabular-nums;transition:background .15s,color .15s}
+.zoom button:hover{color:var(--ink)}
+.zoom button[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+.plot.zoomed{cursor:grab}
+.plot.panning{cursor:grabbing}
+.hint{margin:6px 0 0;font-size:12px;color:var(--muted)}
+.hint .t{display:none}
+@media (hover:none){.hint .m{display:none}.hint .t{display:inline}}
 .legend{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:center;font-size:12.5px;color:var(--muted)}
 .legend > span{white-space:nowrap}
 .sw{display:inline-block;width:11px;height:11px;border-radius:3px;vertical-align:-1px;margin-right:5px}
@@ -264,14 +275,17 @@ function buildShell(){
         </div>
       </div>
       <div class="chart-wrap" id="cw-${s.key}">
-        <div class="chart-title"><h3>Últimas 48 h <span id="sub-${s.key}">· hora peninsular</span></h3>
-          <span class="legend" id="lg-${s.key}" aria-hidden="true"></span></div>
+        <div class="chart-title"><h3><span id="rg-${s.key}">Últimas 48 h</span> <span class="subt" id="sub-${s.key}">· hora peninsular</span></h3>
+          <div class="zoom" role="group" aria-label="Rango de las gráficas">${PRESETS.map(h=>`<button type="button" data-h="${h}" aria-pressed="${h===48}">${h} h</button>`).join("")}</div></div>
+        <div class="legend" id="lg-${s.key}" aria-hidden="true"></div>
         <div class="empty" id="ch-${s.key}">Cargando lecturas…</div>
         <div class="tip" id="tip-${s.key}" aria-hidden="true"></div>
+        <p class="hint" aria-hidden="true"><span class="m">Ctrl + rueda o pellizca en el trackpad para ampliar · arrastra para moverte · doble clic: 48 h</span><span class="t">Pellizca para ampliar · desliza en horizontal para moverte · doble toque: 48 h</span></p>
         <p class="chart-live" id="live-${s.key}" aria-live="polite"></p>
         <p class="sr" id="sum-${s.key}"></p>
       </div>
     </section>`).join("");
+  SPOTS.forEach(attachChart);
 }
 
 function dialSVG(key){
@@ -328,7 +342,7 @@ const isStale = L => !L || (Date.now()-L.t) > 40*60e3;
 /* ---------- render ---------- */
 function renderAll(){
   for(const s of SPOTS) renderSpot(s, state.docs[s.id]);
-  renderTop(); renderStamp();
+  renderTop(); renderStamp(); syncZoomUI();
 }
 function renderTop(){
   const rows = SPOTS.map(s=>({s, L:latest(state.docs[s.id])})).filter(r=>r.L && r.L.vv!=null && !isStale(r.L));
@@ -376,100 +390,165 @@ function renderSpot(s, doc){
 }
 function nearestRot(el, d){ const cur = parseFloat(el.style.getPropertyValue("--rot"))||0; let t=d; while(t-cur>180) t-=360; while(cur-t>180) t+=360; return t; }
 
+/* ---------- chart window (zoom + pan), shared by the three charts ---------- */
+const ZMIN = 2*3600e3, ZMAX = 48*3600e3, PRESETS = [48,24,12,6];
+const view = { span: ZMAX, end: null };   // end null = follow the latest reading
+const geo = {};                             // per chart: geometry + tooltip helpers of the last draw
+let redrawQ = 0;
+function redrawCharts(){
+  if(redrawQ) return;
+  redrawQ = requestAnimationFrame(()=>{ redrawQ = 0; for(const s of SPOTS){ const d=state.docs[s.id]; if(d) drawChart(s,d); } syncZoomUI(); });
+}
+function latestAll(){
+  let m = 0;
+  for(const s of SPOTS){ const d = state.docs[s.id]; if(!d) continue;
+    for(const o of (d.diez||[])){ const t=parseUTC(o.t); if(t>m) m=t; }
+    for(const o of (d.h||[])){ const t=parseUTC(o.t); if(t>m) m=t; } }
+  return Math.min(Date.now(), m || Date.now());
+}
+function windowNow(){
+  const dMax = latestAll(), dMin = dMax - ZMAX;
+  const span = Math.min(ZMAX, Math.max(ZMIN, view.span));
+  const end = view.end==null ? dMax : Math.min(dMax, Math.max(dMin+span, view.end));
+  return {start:end-span, end, span, dMin, dMax};
+}
+function setView(span, end){
+  const dMax = latestAll(), dMin = dMax - ZMAX;
+  span = Math.min(ZMAX, Math.max(ZMIN, span));
+  if(end!=null){ end = Math.min(dMax, Math.max(dMin+span, end)); if(dMax-end < 5*60e3) end = null; }
+  view.span = span; view.end = span>=ZMAX ? null : end;
+  redrawCharts();
+}
+function zoomAt(factor, tAnchor){
+  const w = windowNow(), span = Math.min(ZMAX, Math.max(ZMIN, w.span*factor));
+  const frac = Math.min(1, Math.max(0, (tAnchor - w.start)/w.span));
+  setView(span, tAnchor - frac*span + span);
+}
+function syncZoomUI(){
+  const full = view.span>=ZMAX && view.end==null;
+  document.querySelectorAll(".zoom button").forEach(b=>b.setAttribute("aria-pressed", String(Math.abs(view.span - (+b.dataset.h)*3600e3) < 60e3)));
+  document.querySelectorAll(".plot").forEach(p=>p.classList.toggle("zoomed", !full));
+  const w = windowNow();
+  const same = fmtDay.format(w.start)===fmtDay.format(w.end);
+  const label = full ? "Últimas 48 h"
+    : `${fmtDay.format(w.start)} ${fmtHM.format(w.start)} – ${same?"":fmtDay.format(w.end)+" "}${fmtHM.format(w.end)}`;
+  for(const s of SPOTS){ const el=$(`#rg-${s.key}`); if(el) el.textContent = label; }
+}
+
 function drawChart(s, doc){
   const wrap = $(`#cw-${s.key}`), hostEl = $(`#ch-${s.key}`), tip = $(`#tip-${s.key}`), sum=$(`#sum-${s.key}`);
   const H = hourly(doc);
   const M = (doc.diez||[]).map(o=>({t:parseUTC(o.t), v:kn(o.vv), g:kn(o.g), d:o.d, k:"10"})).filter(o=>isFinite(o.t)&&(o.v!=null||o.g!=null)).sort((a,b)=>a.t-b.t);
-  if(!H.length && !M.length){ hostEl.className="empty"; hostEl.textContent="Sin datos para esta estación."; sum.textContent=""; return; }
+  if(!H.length && !M.length){ hostEl.className="empty"; hostEl.textContent="Sin datos para esta estación."; sum.textContent=""; geo[s.key]=null; return; }
   const W = Math.max(280, Math.round(wrap.clientWidth || 600));
   const narrow = W < 520;
   const HGT = narrow ? 230 : 270;
   const pl = 28, pr = 6, pt = narrow ? 28 : 32, pb = 34;
-  const iw = W-pl-pr, ih = HGT-pt-pb;
-  const tMax = Math.min(Date.now(), Math.max(H.length?H[H.length-1].t:0, M.length?M[M.length-1].t:0));
-  const tMin = tMax - 48*3600e3;
-  const visM = M.filter(o=>o.t>tMin);
-  // hours that the 10-min series covers well (≥ 3 readings) don't need the hourly fallback
-  const cover = new Map(); for(const o of visM){ const hEnd = Math.ceil(o.t/3600e3)*3600e3; cover.set(hEnd,(cover.get(hEnd)||0)+1); }
-  const visH = H.filter(o=>o.t>tMin && (cover.get(o.t)||0) < 3);
-  const pts = [...visM, ...visH.map(o=>({t:o.t, g:o.g, d:o.d, v:null, k:"h"}))].sort((a,b)=>a.t-b.t);
+  const iw = W-pl-pr, ih = HGT-pt-pb, base = pt+ih;
+  const w = windowNow(), tMin = w.start, tMax = w.end, span = w.span;
+  // whole 48 h: decide which hours fall back to the hourly gust bar
+  const allM = M.filter(o=>o.t>w.dMin && o.t<=w.dMax);
+  const cover = new Map(); for(const o of allM){ const hEnd = Math.ceil(o.t/3600e3)*3600e3; cover.set(hEnd,(cover.get(hEnd)||0)+1); }
+  const allH = H.filter(o=>o.t>w.dMin && o.t<=w.dMax && (cover.get(o.t)||0) < 3);
+  // what the window shows (lines keep one reading beyond each edge so they reach the border)
+  const visM = allM.filter(o=>o.t>=tMin-15*60e3 && o.t<=tMax+15*60e3);
+  const visH = allH.filter(o=>o.t>tMin && o.t-3600e3<tMax);
+  const inM = visM.filter(o=>o.t>=tMin && o.t<=tMax);
+  const pts = [...inM, ...visH.map(o=>({t:o.t, g:o.g, d:o.d, v:null, k:"h"}))].sort((a,b)=>a.t-b.t);
   const vmax = Math.max(10, ...pts.map(o=>Math.max(o.g||0,o.v||0)));
   const step = vmax>45?10:5, yMax = Math.ceil((vmax+1)/step)*step;
-  const x = t => pl + (t-tMin)/(tMax-tMin)*iw;
+  const x = t => pl + (t-tMin)/span*iw;
   const y = v => pt + ih - v/yMax*ih;
-  const hourW = iw/48;
-  let g = "";
+  const hourW = iw/(span/3600e3);
+  const cid = `clip-${s.key}`;
+  let g = `<defs><clipPath id="${cid}"><rect x="${pl}" y="0" width="${iw}" height="${base+1}"/></clipPath></defs>`;
   for(let v=0; v<=yMax; v+=step){ g+=`<line x1="${pl}" x2="${W-pr}" y1="${y(v)}" y2="${y(v)}" stroke="var(--grid)"/>`;
     g+=`<text x="${pl-6}" y="${y(v)+4}" text-anchor="end">${v}</text>`; }
   g+=`<text x="${pl-6}" y="${pt-12}" text-anchor="end">kn</text>`;
   // x axis in local (peninsular) time; positions stay on the UTC timeline, so DST days get 23 or 25 hours
-  const first = Math.ceil(tMin/3600e3)*3600e3;
-  for(let t=first; t<=tMax; t+=3600e3){
-    const hh = +fmtHour.format(t);
-    if(hh%6!==0) continue;
+  const minPx = narrow ? 46 : 54;
+  const stepMin = [30,60,120,180,360,720].find(m => m/60*hourW >= minPx) || 720;
+  let sawMidnight = false;
+  for(let t=Math.ceil(tMin/1800e3)*1800e3; t<=tMax; t+=1800e3){
+    const [hh,mm] = fmtHM.format(t).split(":").map(Number), m = hh*60+mm;
+    if(m % stepMin) continue;
     const X = x(t);
-    if(hh===0 && +fmtHour.format(t-3600e3)!==0){ g+=`<line x1="${X}" x2="${X}" y1="${pt-6}" y2="${pt+ih}" stroke="var(--line)"/>`;
-      g+=`<text class="day" x="${Math.min(X+4, W-pr-40)}" y="${pt+ih+29}">${fmtDay.format(t)}</text>`; }
-    g+=`<line x1="${X}" x2="${X}" y1="${pt+ih}" y2="${pt+ih+4}" stroke="var(--muted)"/>`;
-    if(!(narrow && hh%12!==0)) g+=`<text x="${X}" y="${pt+ih+16}" text-anchor="middle">${String(hh).padStart(2,"0")}h</text>`;
+    if(m===0){ sawMidnight = sawMidnight || X < pl+70;
+      g+=`<line x1="${X}" x2="${X}" y1="${pt-6}" y2="${base}" stroke="var(--line)"/>`;
+      g+=`<text class="day" x="${Math.min(X+4, W-pr-40)}" y="${base+29}">${fmtDay.format(t)}</text>`; }
+    g+=`<line x1="${X}" x2="${X}" y1="${base}" y2="${base+4}" stroke="var(--muted)"/>`;
+    const anc = X > W-pr-18 ? "end" : X < pl+14 ? "start" : "middle";
+    g+=`<text x="${X}" y="${base+16}" text-anchor="${anc}">${stepMin<60 ? fmtHM.format(t) : String(hh).padStart(2,"0")+"h"}</text>`;
   }
+  if(!sawMidnight) g+=`<text class="day" x="${pl}" y="${base+29}">${fmtDay.format(tMin)}</text>`;
+  let d = `<g clip-path="url(#${cid})">`;
   // hourly fallback: faint bars where there is no 10-min series
   const gap = Math.min(2, hourW*.2);
   visH.forEach(o=>{ if(o.g==null) return;
-    const x0 = Math.max(pl, x(o.t-3600e3))+gap/2, w = Math.max(1, x(o.t)-gap/2-x0), top=y(o.g);
-    g+=`<rect class="hb" x="${x0.toFixed(1)}" y="${top.toFixed(1)}" width="${w.toFixed(1)}" height="${Math.max(0,pt+ih-top).toFixed(1)}" rx="2"/>`; });
+    const x0 = x(o.t-3600e3)+gap/2, wd = Math.max(1, x(o.t)-gap/2-x0), top=y(o.g);
+    d+=`<rect class="hb" x="${x0.toFixed(1)}" y="${top.toFixed(1)}" width="${wd.toFixed(1)}" height="${Math.max(0,base-top).toFixed(1)}" rx="2"/>`; });
   // 10-min series: split into runs with no gap over 25 min
   const runs=[]; let run=[];
   for(const o of visM){ if(run.length && o.t-run[run.length-1].t>25*60e3){ runs.push(run); run=[]; } run.push(o); }
   if(run.length) runs.push(run);
-  const base = pt+ih;
+  const dotR = hourW >= 60 ? 1 : 0;   // show every reading as a small dot when zoomed in
   for(const r of runs){
     const mv = r.filter(o=>o.v!=null), gv = r.filter(o=>o.g!=null);
-    // soft red band between the mean line and the gust line (readings that have both)
     const bv = r.filter(o=>o.v!=null && o.g!=null);
     if(bv.length>1){
       const top = bv.map((o,i)=>`${i?"L":"M"}${x(o.t).toFixed(1)} ${y(Math.max(o.g,o.v)).toFixed(1)}`).join(" ");
       const bot = bv.slice().reverse().map(o=>`L${x(o.t).toFixed(1)} ${y(o.v).toFixed(1)}`).join(" ");
-      g+=`<path class="ga" d="${top} ${bot} Z"/>`;
+      d+=`<path class="ga" d="${top} ${bot} Z"/>`;
     }
     if(mv.length>1){
       const line = mv.map((o,i)=>`${i?"L":"M"}${x(o.t).toFixed(1)} ${y(o.v).toFixed(1)}`).join(" ");
-      g+=`<path class="ma" d="${line} L${x(mv[mv.length-1].t).toFixed(1)} ${base} L${x(mv[0].t).toFixed(1)} ${base} Z"/>`;
-      g+=`<path class="ml" pathLength="1" d="${line}"/>`;
+      d+=`<path class="ma" d="${line} L${x(mv[mv.length-1].t).toFixed(1)} ${base} L${x(mv[0].t).toFixed(1)} ${base} Z"/>`;
+      d+=`<path class="ml" pathLength="1" d="${line}"/>`;
     }
-    if(gv.length>1) g+=`<path class="gl" pathLength="1" d="${gv.map((o,i)=>`${i?"L":"M"}${x(o.t).toFixed(1)} ${y(o.g).toFixed(1)}`).join(" ")}"/>`;
-    if(r.length<=2){ for(const o of r){ if(o.v!=null) g+=`<circle class="md" cx="${x(o.t).toFixed(1)}" cy="${y(o.v).toFixed(1)}" r="3.5"/>`; if(o.g!=null) g+=`<circle class="gd" cx="${x(o.t).toFixed(1)}" cy="${y(o.g).toFixed(1)}" r="3"/>`; } }
+    if(gv.length>1) d+=`<path class="gl" pathLength="1" d="${gv.map((o,i)=>`${i?"L":"M"}${x(o.t).toFixed(1)} ${y(o.g).toFixed(1)}`).join(" ")}"/>`;
+    if(r.length<=2 || dotR){ for(const o of r){
+      if(o.v!=null) d+=`<circle class="md" cx="${x(o.t).toFixed(1)}" cy="${y(o.v).toFixed(1)}" r="${r.length<=2?3.5:2.6}"/>`;
+      if(o.g!=null) d+=`<circle class="gd" cx="${x(o.t).toFixed(1)}" cy="${y(o.g).toFixed(1)}" r="${r.length<=2?3:2.2}"/>`; } }
   }
-  if(yMax>=12){ g+=`<line class="ref" x1="${pl}" x2="${W-pr}" y1="${y(12)}" y2="${y(12)}"/>`; }
+  if(yMax>=12){ d+=`<line class="ref" x1="${pl}" x2="${W-pr}" y1="${y(12)}" y2="${y(12)}"/>`; }
+  // direction row: one arrow per reading when there is room, otherwise one per hour
+  const sc = narrow?.6:.7, arrow = (t, dir) => `<g transform="translate(${x(t).toFixed(1)} ${pt-15}) rotate(${(dir+180)%360}) scale(${sc})"><path d="M0 -10 L6 4 L0 1 L-6 4 Z" fill="var(--ink)"/></g>`;
+  if(hourW/6 >= 16 && inM.length){
+    for(const o of inM) if(o.d!=null) d+=arrow(o.t, o.d);
+    for(const o of visH) if(o.d!=null) d+=arrow(o.t-1800e3, o.d);
+  } else {
+    const every = Math.max(1, Math.ceil(16/hourW));
+    const lastHour = Math.ceil(tMax/3600e3)*3600e3;
+    for(let k=0; ; k++){
+      const hEnd = lastHour - k*3600e3; if(hEnd <= tMin) break;
+      if(k%every) continue;
+      let dir=null; for(let i=visM.length-1;i>=0;i--){ const o=visM[i]; if(o.t<=hEnd && o.t>hEnd-3600e3 && o.d!=null){ dir=o.d; break; } }
+      if(dir==null){ const h=H.find(o=>o.t===hEnd); dir = h ? h.d : null; }
+      if(dir==null) continue;
+      const c = Math.min(Math.max(hEnd-1800e3, tMin), tMax);
+      d+=arrow(c, dir);
+    }
+  }
+  d += `</g>`;
+  g += d;
   g+=`<line x1="${pl}" x2="${W-pr}" y1="${base}" y2="${base}" stroke="var(--muted)"/>`;
-  // direction row: one arrow per hour (latest 10-min direction in that hour, else the hourly mean)
-  const every = Math.max(1, Math.ceil(15/hourW));
-  const lastHour = Math.ceil(tMax/3600e3)*3600e3;
-  for(let k=0; k<48; k++){
-    if(k%every) continue;
-    const hEnd = lastHour - k*3600e3; if(hEnd-3600e3 < tMin) break;
-    let d=null; for(let i=visM.length-1;i>=0;i--){ const o=visM[i]; if(o.t<=hEnd && o.t>hEnd-3600e3 && o.d!=null){ d=o.d; break; } }
-    if(d==null){ const h=H.find(o=>o.t===hEnd); d = h ? h.d : null; }
-    if(d==null) continue;
-    const cx = x(Math.min(hEnd, tMax)-1800e3), sc = narrow?.6:.7;
-    g+=`<g transform="translate(${cx.toFixed(1)} ${pt-15}) rotate(${(d+180)%360}) scale(${sc})"><path d="M0 -10 L6 4 L0 1 L-6 4 Z" fill="var(--ink)"/></g>`;
-  }
   g+=`<line class="xh" x1="0" x2="0" y1="${pt-4}" y2="${base}" stroke="var(--ink)" stroke-dasharray="3 3" opacity="0"/>`;
   g+=`<circle class="xm" r="5" opacity="0"/><circle class="xg" r="4.5" opacity="0"/>`;
   const intro = !state.introDone.has(s.key); state.introDone.add(s.key);
-  $(`#sub-${s.key}`).textContent = visM.length ? (visH.length ? "· cada 10 min donde hay lecturas guardadas · hora peninsular" : "· cada 10 min · hora peninsular") : "· racha máxima de cada hora · hora peninsular";
-  $(`#lg-${s.key}`).innerHTML = (visM.length?`<span><span class="sw l" style="background:var(--meanc)"></span>Viento medio</span><span><span class="sw l" style="background:var(--gust)"></span>Racha máxima</span>`:"")
-    + (visH.length?`<span><span class="sw" style="background:var(--b0);opacity:.45"></span>Racha máx. horaria${visM.length?", sin datos de 10 min":""}</span>`:"")
+  $(`#sub-${s.key}`).textContent = allM.length ? (allH.length ? "· cada 10 min donde hay lecturas guardadas · hora peninsular" : "· cada 10 min · hora peninsular") : "· racha máxima de cada hora · hora peninsular";
+  $(`#lg-${s.key}`).innerHTML = (allM.length?`<span><span class="sw l" style="background:var(--meanc)"></span>Viento medio</span><span><span class="sw l" style="background:var(--gust)"></span>Racha máxima</span>`:"")
+    + (allH.length?`<span><span class="sw" style="background:var(--b0);opacity:.45"></span>Racha máx. horaria${allM.length?", sin datos de 10 min":""}</span>`:"")
     + (yMax>=12?`<span><span class="sw l dash"></span>12 kn, planeo</span>`:"");
-  hostEl.className="plot"; hostEl.tabIndex=0;
+  hostEl.className = "plot" + ((view.span<ZMAX || view.end!=null) ? " zoomed" : ""); hostEl.tabIndex=0;
   hostEl.setAttribute("role","group");
-  hostEl.setAttribute("aria-label",`Gráfica de ${s.name}. Usa las flechas para recorrer las lecturas.`);
+  hostEl.setAttribute("aria-label",`Gráfica de ${s.name}. Flechas: recorrer lecturas. Más y menos: ampliar o reducir. Cero: ver 48 horas.`);
   hostEl.innerHTML = `<svg class="chart${intro?" intro":""}" viewBox="0 0 ${W} ${HGT}" width="${W}" height="${HGT}" aria-hidden="true">${g}</svg>`;
-  const topG = pts.filter(o=>o.g!=null).reduce((a,b)=>!a||b.g>a.g?b:a,null);
+  const topG = [...allM, ...allH].filter(o=>o.g!=null).reduce((a,b)=>!a||b.g>a.g?b:a,null);
   sum.textContent = topG ? `Racha máxima en 48 horas: ${r0(topG.g)} nudos, ${fmtDay.format(topG.t)} a las ${fmtHM.format(topG.t)}, del ${CARD_LONG[cardinal(topG.d)]||"–"}.` : "";
 
   const el = hostEl.querySelector("svg"), xh = el.querySelector(".xh"), xm = el.querySelector(".xm"), xg = el.querySelector(".xg");
-  const px = o => o.k==="h" ? x(o.t-1800e3) : x(o.t);
+  const px = o => o.k==="h" ? x(Math.min(Math.max(o.t-1800e3, tMin), tMax)) : x(o.t);
+  const hide = () => { tip.classList.remove("on"); xh.setAttribute("opacity","0"); xm.setAttribute("opacity","0"); xg.setAttribute("opacity","0"); };
   const show = idx => {
     const o = pts[idx]; if(!o) return hide();
     state.sel[s.key]=idx;
@@ -489,28 +568,111 @@ function drawChart(s, doc){
     const wr = wrap.getBoundingClientRect(); tip.style.top = (r.top - wr.top + (pt-20)*(r.height/HGT))+"px";
     tip.classList.add("on");
   };
-  const hide = () => { tip.classList.remove("on"); xh.setAttribute("opacity","0"); xm.setAttribute("opacity","0"); xg.setAttribute("opacity","0"); };
-  const idxAt = ev => {
-    const r = el.getBoundingClientRect(), X = (ev.clientX - r.left) * (W / r.width);
+  const toT = clientX => { const r = el.getBoundingClientRect(); return tMin + (((clientX - r.left) * (W / r.width)) - pl)/iw*span; };
+  const idxAt = clientX => {
+    const r = el.getBoundingClientRect(), X = (clientX - r.left) * (W / r.width);
     let bi=null, bd=Infinity; pts.forEach((o,i)=>{ const dd=Math.abs(px(o)-X); if(dd<bd){bd=dd;bi=i;} });
     return bi;
   };
-  hostEl.onpointermove = ev => { if(ev.pointerType==="mouse") show(idxAt(ev)); };
-  hostEl.onpointerleave = ev => { if(ev.pointerType==="mouse") hide(); };
-  hostEl.onpointerup = ev => { if(ev.pointerType!=="mouse"){ show(idxAt(ev)); pinned=s.key; } };
-  hostEl.onpointercancel = hide;
-  hostEl.onkeydown = ev => {
-    const n=pts.length; if(!n) return;
-    let i = Math.min(state.sel[s.key] ?? n-1, n-1);
-    if(ev.key==="ArrowLeft") i=Math.max(0,i-1); else if(ev.key==="ArrowRight") i=Math.min(n-1,i+1);
-    else if(ev.key==="Home") i=0; else if(ev.key==="End") i=n-1; else if(ev.key==="Escape"){ hide(); return; } else return;
-    ev.preventDefault(); show(i); $(`#live-${s.key}`).textContent = tip.innerText.replace(/\n/g,". ");
-  };
-  hostEl.onfocus = () => show(Math.min(state.sel[s.key] ?? pts.length-1, pts.length-1));
-  hostEl.onblur = () => { hide(); $(`#live-${s.key}`).textContent=""; };
+  geo[s.key] = { show, hide, idxAt, toT, n: pts.length, iw, W, el };
+  if(state.sel[s.key]!=null && state.sel[s.key]>=pts.length) state.sel[s.key]=null;
 }
-let pinned=null;
-document.addEventListener("pointerdown", ev=>{ if(pinned && !ev.target.closest(`#cw-${pinned}`)){ const t=$(`#tip-${pinned}`); t&&t.classList.remove("on"); const x=document.querySelector(`#ch-${pinned} .xh`); x&&x.setAttribute("opacity","0"); pinned=null; } });
+
+/* ---------- chart gestures: hover/tap tooltip, drag to pan, pinch / ctrl+wheel to zoom ---------- */
+let pinned = null;
+function attachChart(s){
+  const hostEl = $(`#ch-${s.key}`);
+  const ptrs = new Map();
+  let drag = null, pinch = null, moved = false, lastTap = 0;
+  const G = () => geo[s.key];
+  const live = t => { $(`#live-${s.key}`).textContent = t; };
+  hostEl.addEventListener("pointerdown", ev => {
+    const g = G(); if(!g) return;
+    ptrs.set(ev.pointerId, {x:ev.clientX, y:ev.clientY});
+    moved = false;
+    if(ptrs.size===1){
+      drag = {x0:ev.clientX, y0:ev.clientY, w0:windowNow(), panning:false, id:ev.pointerId, type:ev.pointerType};
+      if(ev.pointerType==="mouse" && ev.button===0){ try{ hostEl.setPointerCapture(ev.pointerId); }catch(_){} }
+    } else if(ptrs.size===2){
+      const [a,b] = [...ptrs.values()];
+      pinch = {d0: Math.hypot(a.x-b.x, a.y-b.y) || 1, w0: windowNow(), tA: g.toT((a.x+b.x)/2)};
+      drag = null; moved = true; g.hide();
+    }
+  });
+  hostEl.addEventListener("pointermove", ev => {
+    const g = G(); if(!g) return;
+    if(ptrs.has(ev.pointerId)) ptrs.set(ev.pointerId, {x:ev.clientX, y:ev.clientY});
+    if(pinch && ptrs.size>=2){
+      const [a,b] = [...ptrs.values()], dist = Math.hypot(a.x-b.x, a.y-b.y) || 1;
+      const span = Math.min(ZMAX, Math.max(ZMIN, pinch.w0.span * pinch.d0/dist));
+      const frac = (pinch.tA - pinch.w0.start)/pinch.w0.span;
+      setView(span, pinch.tA - frac*span + span);
+      return;
+    }
+    if(drag && drag.id===ev.pointerId){
+      const dx = ev.clientX-drag.x0, dy = ev.clientY-drag.y0;
+      if(!drag.panning && Math.abs(dx) > 6 && Math.abs(dx) > Math.abs(dy)) {
+        if(drag.w0.span < ZMAX){ drag.panning = true; moved = true; g.hide(); hostEl.classList.add("panning"); }
+      }
+      if(drag.panning){
+        const r = g.el.getBoundingClientRect(), dt = -dx * (g.W / r.width) / g.iw * drag.w0.span;
+        setView(drag.w0.span, drag.w0.end + dt);
+        return;
+      }
+      if(Math.hypot(dx,dy) > 8) moved = true;
+    }
+    if(ev.pointerType==="mouse" && !(drag && drag.panning)) g.show(g.idxAt(ev.clientX));
+  });
+  const end = ev => {
+    const g = G();
+    const wasTap = drag && drag.id===ev.pointerId && !moved && !pinch;
+    ptrs.delete(ev.pointerId);
+    if(ptrs.size<2) pinch = null;
+    if(ptrs.size===0){ drag = null; hostEl.classList.remove("panning"); }
+    if(!g || ev.type==="pointercancel") return;
+    if(wasTap && ev.pointerType!=="mouse"){
+      const now = Date.now();
+      if(now-lastTap < 320){ lastTap = 0; setView(ZMAX, null); return; }
+      lastTap = now;
+      g.show(g.idxAt(ev.clientX)); pinned = s.key;
+    }
+  };
+  hostEl.addEventListener("pointerup", end);
+  hostEl.addEventListener("pointercancel", ev => { end(ev); const g=G(); g && g.hide(); });
+  hostEl.addEventListener("pointerleave", ev => { if(ev.pointerType==="mouse" && !(drag && drag.panning)){ const g=G(); g && g.hide(); } });
+  hostEl.addEventListener("dblclick", ev => { ev.preventDefault(); setView(ZMAX, null); });
+  hostEl.addEventListener("wheel", ev => {
+    const g = G(); if(!g) return;
+    if(ev.ctrlKey || ev.metaKey){            // ctrl+wheel and trackpad pinch
+      ev.preventDefault(); g.hide();
+      zoomAt(Math.exp(Math.max(-60, Math.min(60, ev.deltaY)) * 0.01), g.toT(ev.clientX));
+    } else if(Math.abs(ev.deltaX) > Math.abs(ev.deltaY) && view.span < ZMAX){   // horizontal swipe pans
+      ev.preventDefault(); g.hide();
+      const w = windowNow(), r = g.el.getBoundingClientRect();
+      setView(w.span, w.end + ev.deltaX * (g.W / r.width) / g.iw * w.span);
+    }
+  }, {passive:false});
+  hostEl.addEventListener("keydown", ev => {
+    const g = G(); if(!g) return;
+    const k = ev.key;
+    const anchor = () => { const w = windowNow(); return view.end==null ? w.end : w.start + w.span/2; };
+    if(k==="+" || k==="="){ ev.preventDefault(); zoomAt(0.5, anchor()); live("Gráficas ampliadas"); return; }
+    if(k==="-" || k==="_"){ ev.preventDefault(); zoomAt(2, anchor()); live("Gráficas reducidas"); return; }
+    if(k==="0"){ ev.preventDefault(); setView(ZMAX, null); live("Últimas 48 horas"); return; }
+    const n = g.n; if(!n) return;
+    let i = Math.min(state.sel[s.key] ?? n-1, n-1);
+    if(k==="ArrowLeft") i=Math.max(0,i-1); else if(k==="ArrowRight") i=Math.min(n-1,i+1);
+    else if(k==="Home") i=0; else if(k==="End") i=n-1; else if(k==="Escape"){ g.hide(); return; } else return;
+    ev.preventDefault(); g.show(i); live($(`#tip-${s.key}`).innerText.replace(/\n/g,". "));
+  });
+  hostEl.addEventListener("focus", () => { const g=G(); if(g && g.n) g.show(Math.min(state.sel[s.key] ?? g.n-1, g.n-1)); });
+  hostEl.addEventListener("blur", () => { const g=G(); g && g.hide(); live(""); });
+  $(`#cw-${s.key}`).querySelectorAll(".zoom button").forEach(b => b.addEventListener("click", () => {
+    const span = (+b.dataset.h)*3600e3, w = windowNow();
+    setView(span, view.end==null ? null : w.start + w.span/2 + span/2);
+  }));
+}
+document.addEventListener("pointerdown", ev=>{ if(pinned && !ev.target.closest(`#cw-${pinned}`)){ const g=geo[pinned]; g && g.hide(); pinned=null; } });
 
 function newestT(){ let t=0; for(const s of SPOTS){ const L=latest(state.docs[s.id]); if(L&&L.t>t) t=L.t; } return t; }
 function oldestT(){ let t=Infinity; for(const s of SPOTS){ const L=latest(state.docs[s.id]); if(L) t=Math.min(t,L.t); } return t===Infinity?0:t; }
