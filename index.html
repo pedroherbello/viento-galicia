@@ -1,0 +1,560 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="description" content="Viento medio y racha máxima cada 10 minutos, en nudos, en Coruña-Dique, Punta Langosteira y Cangas-Porto. Datos de MeteoGalicia.">
+<meta name="theme-color" content="#EDF1F3" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#09141D" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='15' fill='%230D2131'/%3E%3Cpath d='M16 5l5 12-5-3-5 3z' fill='%23D8501C'/%3E%3C/svg%3E">
+<title>Viento Coruña y Cangas</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;800;900&family=Atkinson+Hyperlegible:wght@400;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a three-up "ahora" strip, one instrument panel per spot (compass + readout + verdict, 48 h 10-min strip chart), then a slim data-status bar. */
+:root{
+  --bg:#EDF1F3; --surface:#F9FBFC; --ink:#0D2131; --muted:#556877; --line:#D2DBE1; --grid:#E3E9ED;
+  --accent:#D8501C; --accent-ink:#FFFFFF;
+  --b0:#8494A0;
+  --meanc:#1E5E9A; --gust:#D8501C; --warn:#9A5B00; --ok:#1F8A55;
+  --f-display:"Big Shoulders Display","Arial Narrow","Roboto Condensed",sans-serif;
+  --f-body:"Atkinson Hyperlegible",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,"SFMono-Regular",Menlo,monospace;
+  --r:10px;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#09141D; --surface:#0F1F2B; --ink:#E4ECF1; --muted:#8EA2B1; --line:#1E3343; --grid:#172A3A;
+  --accent:#FF7A3F; --accent-ink:#1A0A02;
+  --b0:#56697A;
+  --meanc:#7DB8E8; --gust:#FF7A3F; --warn:#F0B35A; --ok:#4FD08F; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#09141D; --surface:#0F1F2B; --ink:#E4ECF1; --muted:#8EA2B1; --line:#1E3343; --grid:#172A3A;
+  --accent:#FF7A3F; --accent-ink:#1A0A02;
+  --b0:#56697A;
+  --meanc:#7DB8E8; --gust:#FF7A3F; --warn:#F0B35A; --ok:#4FD08F; color-scheme:dark}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.5;margin:0;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:20px 48px}
+.wrap{max-width:1120px;margin:0 auto;display:grid;gap:26px}
+h1,h2{font-family:var(--f-display);font-weight:800;letter-spacing:.01em;line-height:.92;margin:0;text-wrap:balance}
+.mono{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap}
+button{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:6px}
+
+.live{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:10px 20px;padding:4px 0;min-width:0}
+.live .btns{display:flex;gap:8px;flex-wrap:wrap}
+.btn{appearance:none;border:1.5px solid var(--ink);background:var(--ink);color:var(--bg);padding:9px 18px;border-radius:999px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:8px;min-height:42px;white-space:nowrap}
+.btn:hover:not(:disabled){background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn:disabled{opacity:.5;cursor:progress}
+.btn.ghost{background:transparent;color:var(--ink)}
+.btn svg{width:16px;height:16px;flex:none}
+.btn.busy svg{animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.status{font-size:13px;color:var(--muted);max-width:70ch;display:grid;gap:2px;min-width:0}
+.status .warn{color:var(--warn)}
+.status .msg:empty{display:none}
+.status .msg.err{color:var(--warn)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--ok);display:inline-block;margin-right:6px;vertical-align:1px}
+
+/* ahora strip */
+.now{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.card{position:relative;display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 14px;align-items:center;text-decoration:none;color:inherit;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:14px 16px;min-width:0;transition:border-color .2s}
+.card:hover{border-color:var(--ink)}
+.card.top{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+.card .nm{grid-column:1/-1;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card .flag{position:absolute;top:-9px;right:12px;background:var(--accent);color:var(--accent-ink);font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;padding:2px 8px;border-radius:999px}
+.card .big{font-family:var(--f-display);font-weight:800;font-size:58px;line-height:.86;font-variant-numeric:tabular-nums;white-space:nowrap}
+.card .big small{font-size:20px;font-weight:600;margin-left:3px;color:var(--muted)}
+.card .meta{display:grid;gap:2px;font-size:13px;min-width:0}
+.card .meta > span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card .meta b{font-weight:700}
+.arrow{width:20px;height:20px;display:inline-block;vertical-align:-5px;margin-right:4px;color:var(--ink)}
+
+/* spot panel */
+.spot{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:clamp(16px,3vw,28px);display:grid;gap:18px;min-width:0;scroll-margin-top:16px}
+.spot-head{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:6px 18px}
+.spot-head h2{font-size:clamp(32px,4.6vw,46px);text-transform:uppercase;hyphens:none}
+.spot-head .st{color:var(--muted);font-size:12.5px;white-space:nowrap}
+.note{font-size:13px;color:var(--muted);margin:-10px 0 0;max-width:70ch}
+.inst{display:grid;grid-template-columns:190px minmax(0,1fr);gap:24px;align-items:center}
+.dial{width:100%;max-width:190px;aspect-ratio:1;justify-self:center;display:block}
+.dial text{font-family:var(--f-mono);font-size:11px;fill:var(--muted)}
+.dial .cp{font-family:var(--f-display);font-weight:800;font-size:17px;fill:var(--ink)}
+.needle{transform-origin:100px 100px;transform:rotate(var(--rot,0deg));transition:transform 1.6s cubic-bezier(.2,.9,.25,1.12)}
+.right{display:grid;gap:14px;min-width:0}
+.verdict{font-size:clamp(17px,2vw,20px);line-height:1.35;margin:0;max-width:52ch;text-wrap:pretty}
+.verdict b{font-weight:700}
+.readout{display:flex;flex-wrap:wrap;gap:10px 36px;align-items:flex-end}
+.ro{display:grid;gap:3px;min-width:0}
+.ro .lb{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:700;white-space:nowrap}
+.ro .vl{font-family:var(--f-display);font-weight:800;font-size:clamp(46px,7vw,76px);line-height:.86;font-variant-numeric:tabular-nums;white-space:nowrap}
+.ro .vl small{font-size:.32em;font-weight:600;color:var(--muted);margin-left:4px}
+.ro .sm{font-size:12.5px;color:var(--muted);white-space:nowrap}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{display:inline-flex;gap:6px;align-items:center;border:1px solid var(--line);border-radius:999px;padding:3px 11px;font-size:13px;white-space:nowrap}
+.chip.stale{border-color:var(--warn);color:var(--warn)}
+.chip .sw{margin:0}
+
+.chart-wrap{position:relative;min-width:0}
+.chart-title{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:8px 18px;margin-bottom:8px}
+.chart-title h3{margin:0;font-size:14px;font-weight:700}
+.chart-title h3 span{color:var(--muted);font-weight:400}
+.legend{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:center;font-size:12.5px;color:var(--muted)}
+.legend > span{white-space:nowrap}
+.sw{display:inline-block;width:11px;height:11px;border-radius:3px;vertical-align:-1px;margin-right:5px}
+.plot{border-radius:8px;outline-offset:4px}
+svg.chart{display:block;width:100%;height:auto;overflow:visible;touch-action:pan-y;user-select:none;-webkit-user-select:none}
+svg.chart text{font-family:var(--f-mono);font-size:11px;fill:var(--muted)}
+svg.chart .day{fill:var(--ink);font-weight:500}
+.tip{position:absolute;pointer-events:none;background:var(--ink);color:var(--bg);border-radius:8px;padding:8px 11px;font-size:12.5px;line-height:1.4;white-space:nowrap;transform:translate(-50%,-100%);opacity:0;transition:opacity .12s;z-index:2}
+.tip b{font-family:var(--f-mono);font-weight:500}
+.tip.on{opacity:1}
+.empty{padding:38px 12px;text-align:center;color:var(--muted);border:1px dashed var(--line);border-radius:var(--r)}
+.skel .vl,.skel .big{color:var(--line)}
+.is-stale .big,.is-stale .vl{color:var(--muted)}
+.card .age{color:var(--warn);font-weight:700}
+.nm .s,.lb .s{display:none}
+.chart-live{margin:4px 0 0;font-size:12px;color:var(--muted);min-height:1em}
+svg.chart .ref{stroke:var(--muted);stroke-dasharray:4 4;stroke-opacity:.7}
+svg.chart .hb{fill:var(--b0);fill-opacity:.32}
+svg.chart .ma{fill:var(--meanc);fill-opacity:.16;stroke:none}
+svg.chart .ml{fill:none;stroke:var(--meanc);stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
+svg.chart .gl{fill:none;stroke:var(--gust);stroke-width:1.6;stroke-linejoin:round;stroke-linecap:round}
+svg.chart .md,svg.chart .xm{fill:var(--meanc);stroke:var(--surface);stroke-width:2}
+svg.chart .gd,svg.chart .xg{fill:var(--gust);stroke:var(--surface);stroke-width:2}
+svg.chart.intro .ml,svg.chart.intro .gl{stroke-dasharray:1 0;animation:draw 1.4s cubic-bezier(.3,.7,.2,1) backwards}
+svg.chart.intro .ma{animation:fade 1.2s .3s both}
+@keyframes draw{from{stroke-dasharray:0 1}to{stroke-dasharray:1 0}}
+@keyframes fade{from{opacity:0}}
+.sw.l{height:3px;border-radius:2px;width:16px;vertical-align:3px}
+.sw.dash{height:0;border-top:2px dashed var(--muted);background:none;border-radius:0}
+
+footer{color:var(--muted);font-size:13px;display:grid;gap:6px;border-top:1px solid var(--line);padding-top:14px}
+footer p{margin:0;max-width:80ch}
+
+@media (max-width:860px){
+  .now{gap:8px}
+  .card{grid-template-columns:1fr;padding:12px 12px 10px;gap:2px}
+  .card .big{font-size:44px}
+  .card .meta{font-size:12px}
+}
+@media (max-width:620px){
+  .inst{grid-template-columns:96px minmax(0,1fr);grid-template-areas:"ro ro" "dial vd" "ch ch";gap:14px 14px;align-items:center}
+  .right{display:contents}
+  .readout{grid-area:ro;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px 12px}
+  .dial{grid-area:dial;max-width:96px}
+  .verdict{grid-area:vd;font-size:15.5px}
+  .chips{grid-area:ch}
+  .chip{white-space:normal}
+  .ro .vl{font-size:42px}
+  .ro .sm{white-space:normal}
+  .dial .cp{font-size:32px}
+  .dial .sub{display:none}
+  .spot-head .st{white-space:normal}
+}
+@media (max-width:400px){
+  .card{padding:10px 9px 8px}
+  .card .nm{font-size:10.5px;letter-spacing:.04em}
+  .card .big{font-size:38px}
+  .card .big small{font-size:15px}
+  .card .meta .t{display:none}
+  .nm .f,.lb .f{display:none}.nm .s,.lb .s{display:inline}
+  .card .flag{font-size:9.5px;right:6px;padding:1px 6px}
+}
+@media (prefers-reduced-motion:reduce){.needle{transition:none}.btn.busy svg{animation:none}svg.chart.intro .ml,svg.chart.intro .gl,svg.chart.intro .ma{animation:none}}
+</style>
+
+</head>
+<body>
+<div class="wrap">
+
+  <h1 class="sr">Viento en nudos: Coruña-Dique, Punta Langosteira y Cangas-Porto</h1>
+  <nav class="now" id="now" aria-label="Viento ahora en cada spot"></nav>
+  <main id="spots" style="display:grid;gap:22px"></main>
+
+  <section class="live" aria-label="Estado de los datos">
+    <div class="status">
+      <span id="stamp"></span>
+      <span class="msg" id="msg" role="status" aria-live="polite"></span>
+    </div>
+    <div class="btns">
+      <button class="btn" id="refresh" type="button" hidden>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg>
+        <span>Actualizar</span>
+      </button>
+    </div>
+  </section>
+
+  <footer>
+    <p>Datos del servicio de observación de MeteoGalicia (Xunta de Galicia), <span class="mono">servizos.meteogalicia.gal</span>. Anemómetros a 10 m. Cada 5 minutos una tarea automática de GitHub lee la última lectura de 10 minutos de cada estación y la guarda; la gráfica dibuja el viento medio y la racha máxima de esas lecturas. Si falta alguna, se ve en gris la racha máxima de esa hora.</p>
+    <p>MeteoGalicia publica en UTC; aquí todo está en hora peninsular (UTC+1 en invierno, UTC+2 en verano). 1 nudo = 1,852 km/h.</p>
+    <p>Punta Langosteira sustituye a Coruña-Torre de Hércules, que no tiene anemómetro.</p>
+  </footer>
+</div>
+
+<script>
+(() => {
+"use strict";
+const KN = 1.943844;
+const SPOTS = [
+  {id:"14000", key:"dique", name:"Coruña-Dique", short:"Dique", st:"Estación 14000 · 5 m s. n. m. · A Coruña"},
+  {id:"14003", key:"langosteira", name:"Punta Langosteira", short:"Langosteira", st:"Estación 14003 · 5 m s. n. m. · Arteixo", note:"Sustituye a Torre de Hércules, que no mide viento. Está 10,6 km al oeste, en costa abierta."},
+  {id:"10906", key:"cangas", name:"Cangas-Porto", short:"Cangas", st:"Estación 10906 · 3 m s. n. m. · Cangas"}
+];
+// Data file written every few minutes by the GitHub Actions collector (branch "data").
+// On GitHub Pages (owner.github.io/repo/) the raw URL is derived from the address; ?data=<url> overrides it.
+const DATA_URL = (() => {
+  try{ const q = new URLSearchParams(location.search).get("data"); if(q) return q; }catch(_){}
+  const host = location.hostname, m = /^([^.]+)\.github\.io$/i.exec(host);
+  const repo = location.pathname.split("/").filter(Boolean)[0];
+  if(m && repo) return `https://raw.githubusercontent.com/${m[1]}/${repo}/data/spots.json`;
+  return "data/spots.json";
+})();
+const POLL = 2*60e3;          // reload the data file this often while the page is visible
+
+const CARD = ["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSO","SO","OSO","O","ONO","NO","NNO"];
+const CARD_LONG = {N:"norte",NNE:"nornordeste",NE:"nordeste",ENE:"estenordeste",E:"este",ESE:"estesudeste",SE:"sudeste",SSE:"sursudeste",S:"sur",SSO:"sursudoeste",SO:"sudoeste",OSO:"oestesudoeste",O:"oeste",ONO:"oestenoroeste",NO:"noroeste",NNO:"nornoroeste"};
+const BFT = [[1,"Calma"],[4,"Ventolina"],[7,"Flojito"],[11,"Flojo"],[17,"Bonancible"],[22,"Fresquito"],[28,"Fresco"],[34,"Frescachón"],[41,"Temporal"],[48,"Temporal fuerte"],[56,"Temporal duro"],[64,"Temporal muy duro"],[Infinity,"Temporal huracanado"]];
+
+const $ = s => document.querySelector(s);
+const TZ = "Europe/Madrid";
+const fmtHM = new Intl.DateTimeFormat("es-ES",{timeZone:TZ,hour:"2-digit",minute:"2-digit"});
+const fmtDay = new Intl.DateTimeFormat("es-ES",{timeZone:TZ,weekday:"short",day:"numeric"});
+const fmtHour = new Intl.DateTimeFormat("es-ES",{timeZone:TZ,hour:"2-digit",hourCycle:"h23"});
+const parseUTC = s => { const m = /^(\d{4})-(\d\d)-(\d\d)T(\d\d):(\d\d)/.exec(s||""); return m ? Date.UTC(+m[1],m[2]-1,+m[3],+m[4],+m[5]) : NaN; };
+const kn = ms => (ms==null||!isFinite(ms)) ? null : ms*KN;
+const r0 = v => v==null ? "–" : String(Math.round(v));
+const kmh = k => k==null ? "" : Math.round(k/KN*3.6)+" km/h";
+const cardinal = d => d==null ? "–" : CARD[Math.round((((d%360)+360)%360)/22.5)%16];
+const beaufort = k => { if(k==null) return null; const v=Math.round(k); for(let i=0;i<BFT.length;i++) if(v<BFT[i][0]) return {n:i,name:BFT[i][1]}; };
+const ago = t => { const m = Math.round((Date.now()-t)/60000); if(m<1) return "ahora mismo"; if(m<60) return `hace ${m} min`; const h=Math.floor(m/60); if(h<24) return `hace ${h} h${m%60?" "+(m%60)+" min":""}`; return `hace ${Math.floor(h/24)} d`; };
+const arrowSVG = d => d==null ? "" : `<svg class="arrow" viewBox="-12 -12 24 24" aria-hidden="true"><g transform="rotate(${(d+180)%360})"><path d="M0 -10 L6 4 L0 1 L-6 4 Z" fill="currentColor"/></g></svg>`;
+const esc = s => String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const opp = d => cardinal((d+180)%360);
+
+/* ---------- state ---------- */
+const state = { docs:{}, loaded:false, busy:false, lastTry:0, fileAt:null, introDone:new Set(), sel:{} };
+
+/* ---------- static shell ---------- */
+function buildShell(){
+  $("#now").innerHTML = SPOTS.map(s=>`
+    <a class="card skel" href="#${s.key}" id="c-${s.key}">
+      <span class="nm"><span class="f">${esc(s.name)}</span><span class="s">${esc(s.short)}</span></span>
+      <span class="big">–<small>kn</small></span>
+      <span class="meta"><span>Racha –</span><span>&nbsp;</span></span>
+    </a>`).join("");
+  $("#spots").innerHTML = SPOTS.map(s=>`
+    <section class="spot" id="${s.key}" aria-labelledby="h-${s.key}">
+      <div class="spot-head"><h2 id="h-${s.key}">${esc(s.name)}</h2><span class="st mono">${esc(s.st)}</span></div>
+      ${s.note?`<p class="note">${esc(s.note)}</p>`:""}
+      <div class="inst">
+        ${dialSVG(s.key)}
+        <div class="right" id="ro-${s.key}">
+          <div class="readout skel">
+            <div class="ro"><span class="lb"><span class="f">Viento medio</span><span class="s">Medio</span></span><span class="vl">–<small>kn</small></span><span class="sm">&nbsp;</span></div>
+            <div class="ro"><span class="lb">Racha</span><span class="vl">–<small>kn</small></span><span class="sm">&nbsp;</span></div>
+            <div class="ro"><span class="lb">Viene del</span><span class="vl">–</span><span class="sm">&nbsp;</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="chart-wrap" id="cw-${s.key}">
+        <div class="chart-title"><h3>Últimas 48 h <span id="sub-${s.key}">· hora peninsular</span></h3>
+          <span class="legend" id="lg-${s.key}" aria-hidden="true"></span></div>
+        <div class="empty" id="ch-${s.key}">Cargando lecturas…</div>
+        <div class="tip" id="tip-${s.key}" aria-hidden="true"></div>
+        <p class="chart-live" id="live-${s.key}" aria-live="polite"></p>
+        <p class="sr" id="sum-${s.key}"></p>
+      </div>
+    </section>`).join("");
+}
+
+function dialSVG(key){
+  let ticks="";
+  for(let i=0;i<72;i++){ const a=i*5, major=a%45===0, len=major?11:(a%15===0?6:3);
+    ticks+=`<line x1="100" y1="18" x2="100" y2="${18+len}" transform="rotate(${a} 100 100)" stroke="var(--${major?"ink":"muted"})" stroke-opacity="${major?1:.45}" stroke-width="${major?1.6:1}"/>`; }
+  const pos = (a,r)=>[100+r*Math.sin(a*Math.PI/180), 100-r*Math.cos(a*Math.PI/180)];
+  const cps=[["N",0],["E",90],["S",180],["O",270]].map(([l,a])=>{const [x,y]=pos(a,108); return `<text class="cp" x="${x}" y="${y+6}" dominant-baseline="auto" text-anchor="middle">${l}</text>`;}).join("");
+  const sub=[["NE",45],["SE",135],["SO",225],["NO",315]].map(([l,a])=>{const [x,y]=pos(a,107); return `<text class="sub" x="${x}" y="${y+4}" text-anchor="middle">${l}</text>`;}).join("");
+  return `<svg class="dial" viewBox="-24 -24 248 248" role="img" aria-label="Rosa de los vientos sin lectura" id="dial-${key}">
+    <circle cx="100" cy="100" r="86" fill="var(--bg)" stroke="var(--line)"/>
+    <circle cx="100" cy="100" r="46" fill="none" stroke="var(--grid)"/>
+    ${ticks}${cps}${sub}
+    <g class="needle" id="nd-${key}" opacity="0">
+      <circle cx="100" cy="34" r="5.5" fill="var(--surface)" stroke="var(--accent)" stroke-width="3"/>
+      <line x1="100" y1="40" x2="100" y2="150" stroke="var(--accent)" stroke-width="3" stroke-linecap="round"/>
+      <path d="M100 170 L90 146 L100 152 L110 146 Z" fill="var(--accent)"/>
+    </g>
+    <circle cx="100" cy="100" r="5" fill="var(--ink)"/>
+  </svg>`;
+}
+
+/* ---------- derived ---------- */
+function latest(doc){
+  const u = doc && doc.u;
+  if(!u || !u.t) return null;
+  return {t:parseUTC(u.t), vv:kn(u.vv), g:kn(u.g), d:u.d};
+}
+function hourly(doc){ return (doc&&doc.h||[]).map(o=>({t:parseUTC(o.t), d:o.d, g:kn(o.g)})).filter(o=>isFinite(o.t)).sort((a,b)=>a.t-b.t); }
+// gust trend: mean of last 3 hours vs the 3 before
+function trend(doc){
+  const H = hourly(doc).filter(o=>o.g!=null); if(H.length<6) return null;
+  const a = H.slice(-3), b = H.slice(-6,-3);
+  if(a[2].t-b[0].t > 7*3600e3) return null;
+  const m = x => x.reduce((s,o)=>s+o.g,0)/x.length, diff = m(a)-m(b);
+  return diff>2 ? {w:"al alza",s:"↗"} : diff<-2 ? {w:"a la baja",s:"↘"} : {w:"estables",s:"→"};
+}
+const gusty = (k,g) => k!=null && g!=null && g>=12 && g/Math.max(k,1) > 1.6;
+function feel(k, g){
+  if(k==null) return "";
+  const base = feel0(k);
+  return gusty(k,g) ? `${base}, muy racheado` : base;
+}
+function feel0(k){
+  if(k<8) return "poco para navegar a vela";
+  if(k<12) return "brisa para vela ligera";
+  if(k<18) return "suficiente para planear";
+  if(k<25) return "buen viento";
+  if(k<34) return "viento fuerte";
+  return "temporal";
+}
+const isStale = L => !L || (Date.now()-L.t) > 40*60e3;
+
+/* ---------- render ---------- */
+function renderAll(){
+  for(const s of SPOTS) renderSpot(s, state.docs[s.id]);
+  renderTop(); renderStamp();
+}
+function renderTop(){
+  const rows = SPOTS.map(s=>({s, L:latest(state.docs[s.id])})).filter(r=>r.L && r.L.vv!=null && !isStale(r.L));
+  SPOTS.forEach(s=>{ const c=$(`#c-${s.key}`); c.classList.remove("top"); const f=c.querySelector(".flag"); if(f) f.remove(); });
+  if(!state.loaded || !rows.length) return;
+  rows.sort((a,b)=>b.L.vv-a.L.vv);
+  const best = rows[0], tie = rows[1] && Math.round(rows[1].L.vv)===Math.round(best.L.vv);
+  if(!tie && best.L.vv>=1){ const c=$(`#c-${best.s.key}`); c.classList.add("top"); c.insertAdjacentHTML("afterbegin",`<span class="flag">Más viento</span>`); }
+}
+function renderSpot(s, doc){
+  const card = $(`#c-${s.key}`), right = $(`#ro-${s.key}`), host = $(`#ch-${s.key}`), dial=$(`#dial-${s.key}`);
+  if(!doc){
+    if(state.loaded) host.textContent = "Todavía no hay lecturas de esta estación.";
+    return;
+  }
+  const L = latest(doc), stale = isStale(L), b = L ? beaufort(L.vv) : null, tr = trend(doc);
+  card.classList.remove("skel");
+  card.classList.toggle("is-stale", !!(L && stale)); right.classList.toggle("is-stale", !!(L && stale));
+  card.innerHTML = `<span class="nm"><span class="f">${esc(s.name)}</span><span class="s">${esc(s.short)}</span></span>
+    <span class="big">${r0(L&&L.vv)}<small>kn</small></span>
+    <span class="meta"><span>Racha <b class="mono">${r0(L&&L.g)}</b></span>
+      <span>${arrowSVG(L&&L.d)}<b>${cardinal(L&&L.d)}</b><span class="t mono"> · ${L?fmtHM.format(L.t):"–"}</span></span>${L&&stale?`<span class="age">Sin datos ${ago(L.t)}</span>`:""}</span>`;
+  card.setAttribute("aria-label", L ? `${s.name}: ${r0(L.vv)} nudos de media, racha ${r0(L.g)}, viene del ${CARD_LONG[cardinal(L.d)]||"–"}, lectura de las ${fmtHM.format(L.t)}` : s.name);
+  const dir = L&&L.d!=null ? cardinal(L.d) : null;
+  const verdict = L && L.vv!=null
+    ? `<b>${r0(L.vv)} kn${L.g!=null?`, rachas de ${r0(L.g)}`:""}</b>${dir?` del ${CARD_LONG[dir]}`:""}: ${feel(L.vv, L.g)}.${tr?` Rachas <b>${tr.w}</b> en las últimas 3 h.`:""}${stale?` <span style="color:var(--warn)">La lectura tiene más de 40 min.</span>`:""}`
+    : "Sin lectura de 10 minutos.";
+  right.innerHTML = `
+    <div class="readout">
+      <div class="ro"><span class="lb"><span class="f">Viento medio</span><span class="s">Medio</span></span><span class="vl">${r0(L&&L.vv)}<small>kn</small></span><span class="sm mono">${kmh(L&&L.vv)||"&nbsp;"}</span></div>
+      <div class="ro"><span class="lb">Racha</span><span class="vl">${r0(L&&L.g)}<small>kn</small></span><span class="sm mono">${kmh(L&&L.g)||"&nbsp;"}</span></div>
+      <div class="ro"><span class="lb">Viene del</span><span class="vl">${dir||"–"}</span><span class="sm mono">${dir?`${Math.round(L.d)}° · hacia ${opp(L.d)}`:"&nbsp;"}</span></div>
+    </div>
+    <p class="verdict">${verdict}</p>
+    <div class="chips">${b?`<span class="chip"><b>Fuerza ${b.n}</b> · ${b.name}</span>`:""}
+      <span class="chip ${stale?"stale":""}">${L?`Lectura de las <b class="mono">${fmtHM.format(L.t)}</b> · ${ago(L.t)}`:"Sin lectura"}</span></div>`;
+  const nd = $(`#nd-${s.key}`);
+  if(L && L.d!=null){
+    nd.setAttribute("opacity","1");
+    dial.setAttribute("aria-label", `Rosa de los vientos: viene del ${CARD_LONG[dir]} (${Math.round(L.d)}°) y sopla hacia el ${CARD_LONG[opp(L.d)]}`);
+    const target = nearestRot(nd, L.d);
+    requestAnimationFrame(()=>requestAnimationFrame(()=>nd.style.setProperty("--rot", `${target}deg`)));
+  } else { nd.setAttribute("opacity","0"); dial.setAttribute("aria-label","Rosa de los vientos sin lectura"); }
+  drawChart(s, doc);
+}
+function nearestRot(el, d){ const cur = parseFloat(el.style.getPropertyValue("--rot"))||0; let t=d; while(t-cur>180) t-=360; while(cur-t>180) t+=360; return t; }
+
+function drawChart(s, doc){
+  const wrap = $(`#cw-${s.key}`), hostEl = $(`#ch-${s.key}`), tip = $(`#tip-${s.key}`), sum=$(`#sum-${s.key}`);
+  const H = hourly(doc);
+  const M = (doc.diez||[]).map(o=>({t:parseUTC(o.t), v:kn(o.vv), g:kn(o.g), d:o.d, k:"10"})).filter(o=>isFinite(o.t)&&(o.v!=null||o.g!=null)).sort((a,b)=>a.t-b.t);
+  if(!H.length && !M.length){ hostEl.className="empty"; hostEl.textContent="Sin datos para esta estación."; sum.textContent=""; return; }
+  const W = Math.max(280, Math.round(wrap.clientWidth || 600));
+  const narrow = W < 520;
+  const HGT = narrow ? 230 : 270;
+  const pl = 28, pr = 6, pt = narrow ? 28 : 32, pb = 34;
+  const iw = W-pl-pr, ih = HGT-pt-pb;
+  const tMax = Math.max(H.length?H[H.length-1].t:0, M.length?M[M.length-1].t:0);
+  const tMin = tMax - 48*3600e3;
+  const visM = M.filter(o=>o.t>tMin);
+  // hours that the 10-min series covers well (≥ 3 readings) don't need the hourly fallback
+  const cover = new Map(); for(const o of visM){ const hEnd = Math.ceil(o.t/3600e3)*3600e3; cover.set(hEnd,(cover.get(hEnd)||0)+1); }
+  const visH = H.filter(o=>o.t>tMin && (cover.get(o.t)||0) < 3);
+  const pts = [...visM, ...visH.map(o=>({t:o.t, g:o.g, d:o.d, v:null, k:"h"}))].sort((a,b)=>a.t-b.t);
+  const vmax = Math.max(10, ...pts.map(o=>Math.max(o.g||0,o.v||0)));
+  const step = vmax>45?10:5, yMax = Math.ceil((vmax+1)/step)*step;
+  const x = t => pl + (t-tMin)/(tMax-tMin)*iw;
+  const y = v => pt + ih - v/yMax*ih;
+  const hourW = iw/48;
+  let g = "";
+  for(let v=0; v<=yMax; v+=step){ g+=`<line x1="${pl}" x2="${W-pr}" y1="${y(v)}" y2="${y(v)}" stroke="var(--grid)"/>`;
+    g+=`<text x="${pl-6}" y="${y(v)+4}" text-anchor="end">${v}</text>`; }
+  g+=`<text x="${pl-6}" y="${pt-12}" text-anchor="end">kn</text>`;
+  // x axis in local (peninsular) time; positions stay on the UTC timeline, so DST days get 23 or 25 hours
+  const first = Math.ceil(tMin/3600e3)*3600e3;
+  for(let t=first; t<=tMax; t+=3600e3){
+    const hh = +fmtHour.format(t);
+    if(hh%6!==0) continue;
+    const X = x(t);
+    if(hh===0 && +fmtHour.format(t-3600e3)!==0){ g+=`<line x1="${X}" x2="${X}" y1="${pt-6}" y2="${pt+ih}" stroke="var(--line)"/>`;
+      g+=`<text class="day" x="${Math.min(X+4, W-pr-40)}" y="${pt+ih+29}">${fmtDay.format(t)}</text>`; }
+    g+=`<line x1="${X}" x2="${X}" y1="${pt+ih}" y2="${pt+ih+4}" stroke="var(--muted)"/>`;
+    if(!(narrow && hh%12!==0)) g+=`<text x="${X}" y="${pt+ih+16}" text-anchor="middle">${String(hh).padStart(2,"0")}h</text>`;
+  }
+  // hourly fallback: faint bars where there is no 10-min series
+  const gap = Math.min(2, hourW*.2);
+  visH.forEach(o=>{ if(o.g==null) return;
+    const x0 = Math.max(pl, x(o.t-3600e3))+gap/2, w = Math.max(1, x(o.t)-gap/2-x0), top=y(o.g);
+    g+=`<rect class="hb" x="${x0.toFixed(1)}" y="${top.toFixed(1)}" width="${w.toFixed(1)}" height="${Math.max(0,pt+ih-top).toFixed(1)}" rx="2"/>`; });
+  // 10-min series: split into runs with no gap over 25 min
+  const runs=[]; let run=[];
+  for(const o of visM){ if(run.length && o.t-run[run.length-1].t>25*60e3){ runs.push(run); run=[]; } run.push(o); }
+  if(run.length) runs.push(run);
+  const base = pt+ih;
+  for(const r of runs){
+    const mv = r.filter(o=>o.v!=null), gv = r.filter(o=>o.g!=null);
+    if(mv.length>1){
+      const line = mv.map((o,i)=>`${i?"L":"M"}${x(o.t).toFixed(1)} ${y(o.v).toFixed(1)}`).join(" ");
+      g+=`<path class="ma" d="${line} L${x(mv[mv.length-1].t).toFixed(1)} ${base} L${x(mv[0].t).toFixed(1)} ${base} Z"/>`;
+      g+=`<path class="ml" pathLength="1" d="${line}"/>`;
+    }
+    if(gv.length>1) g+=`<path class="gl" pathLength="1" d="${gv.map((o,i)=>`${i?"L":"M"}${x(o.t).toFixed(1)} ${y(o.g).toFixed(1)}`).join(" ")}"/>`;
+    if(r.length<=2){ for(const o of r){ if(o.v!=null) g+=`<circle class="md" cx="${x(o.t).toFixed(1)}" cy="${y(o.v).toFixed(1)}" r="3.5"/>`; if(o.g!=null) g+=`<circle class="gd" cx="${x(o.t).toFixed(1)}" cy="${y(o.g).toFixed(1)}" r="3"/>`; } }
+  }
+  if(yMax>=12){ g+=`<line class="ref" x1="${pl}" x2="${W-pr}" y1="${y(12)}" y2="${y(12)}"/>`; }
+  g+=`<line x1="${pl}" x2="${W-pr}" y1="${base}" y2="${base}" stroke="var(--muted)"/>`;
+  // direction row: one arrow per hour (latest 10-min direction in that hour, else the hourly mean)
+  const every = Math.max(1, Math.ceil(15/hourW));
+  const lastHour = Math.ceil(tMax/3600e3)*3600e3;
+  for(let k=0; k<48; k++){
+    if(k%every) continue;
+    const hEnd = lastHour - k*3600e3; if(hEnd-3600e3 < tMin) break;
+    let d=null; for(let i=visM.length-1;i>=0;i--){ const o=visM[i]; if(o.t<=hEnd && o.t>hEnd-3600e3 && o.d!=null){ d=o.d; break; } }
+    if(d==null){ const h=H.find(o=>o.t===hEnd); d = h ? h.d : null; }
+    if(d==null) continue;
+    const cx = x(Math.min(hEnd, tMax)-1800e3), sc = narrow?.6:.7;
+    g+=`<g transform="translate(${cx.toFixed(1)} ${pt-15}) rotate(${(d+180)%360}) scale(${sc})"><path d="M0 -10 L6 4 L0 1 L-6 4 Z" fill="var(--ink)"/></g>`;
+  }
+  g+=`<line class="xh" x1="0" x2="0" y1="${pt-4}" y2="${base}" stroke="var(--ink)" stroke-dasharray="3 3" opacity="0"/>`;
+  g+=`<circle class="xm" r="5" opacity="0"/><circle class="xg" r="4.5" opacity="0"/>`;
+  const intro = !state.introDone.has(s.key); state.introDone.add(s.key);
+  $(`#sub-${s.key}`).textContent = visM.length ? (visH.length ? "· cada 10 min donde hay lecturas guardadas · hora peninsular" : "· cada 10 min · hora peninsular") : "· racha máxima de cada hora · hora peninsular";
+  $(`#lg-${s.key}`).innerHTML = (visM.length?`<span><span class="sw l" style="background:var(--meanc)"></span>Viento medio</span><span><span class="sw l" style="background:var(--gust)"></span>Racha máxima</span>`:"")
+    + (visH.length?`<span><span class="sw" style="background:var(--b0);opacity:.45"></span>Racha máx. horaria${visM.length?", sin datos de 10 min":""}</span>`:"")
+    + (yMax>=12?`<span><span class="sw l dash"></span>12 kn, planeo</span>`:"");
+  hostEl.className="plot"; hostEl.tabIndex=0;
+  hostEl.setAttribute("role","group");
+  hostEl.setAttribute("aria-label",`Gráfica de ${s.name}. Usa las flechas para recorrer las lecturas.`);
+  hostEl.innerHTML = `<svg class="chart${intro?" intro":""}" viewBox="0 0 ${W} ${HGT}" width="${W}" height="${HGT}" aria-hidden="true">${g}</svg>`;
+  const topG = pts.filter(o=>o.g!=null).reduce((a,b)=>!a||b.g>a.g?b:a,null);
+  sum.textContent = topG ? `Racha máxima en 48 horas: ${r0(topG.g)} nudos, ${fmtDay.format(topG.t)} a las ${fmtHM.format(topG.t)}, del ${CARD_LONG[cardinal(topG.d)]||"–"}.` : "";
+
+  const el = hostEl.querySelector("svg"), xh = el.querySelector(".xh"), xm = el.querySelector(".xm"), xg = el.querySelector(".xg");
+  const px = o => o.k==="h" ? x(o.t-1800e3) : x(o.t);
+  const show = idx => {
+    const o = pts[idx]; if(!o) return hide();
+    state.sel[s.key]=idx;
+    const X = px(o);
+    xh.setAttribute("x1",X); xh.setAttribute("x2",X); xh.setAttribute("opacity",".55");
+    if(o.v!=null){ xm.setAttribute("cx",X); xm.setAttribute("cy",y(o.v)); xm.setAttribute("opacity","1"); } else xm.setAttribute("opacity","0");
+    if(o.g!=null && o.k==="10"){ xg.setAttribute("cx",X); xg.setAttribute("cy",y(o.g)); xg.setAttribute("opacity","1"); } else xg.setAttribute("opacity","0");
+    const dirTxt = o.d!=null ? ` · del ${cardinal(o.d)} ${Math.round(o.d)}°` : "";
+    if(o.k==="h"){
+      const a0=fmtHM.format(o.t-3600e3), a1=fmtHM.format(o.t);
+      tip.innerHTML = `<b>${fmtDay.format(o.t-3600e3)} · ${a0===a1?`hasta las ${a1} (cambio de hora)`:`${a0}–${a1}`}</b><br>Racha máx. de la hora ${r0(o.g)} kn${dirTxt}<br><span style="opacity:.75">Sin lecturas de 10 min</span>`;
+    } else {
+      tip.innerHTML = `<b>${fmtDay.format(o.t)} · ${fmtHM.format(o.t)}</b><br>${[o.v!=null?`Medio ${r0(o.v)} kn`:"",o.g!=null?`Racha ${r0(o.g)} kn`:""].filter(Boolean).join(" · ")}${dirTxt}`;
+    }
+    const r = el.getBoundingClientRect(), cw = wrap.clientWidth, half = Math.min(120, cw/2);
+    tip.style.left = Math.min(Math.max(X*(r.width/W), half), cw-half)+"px";
+    const wr = wrap.getBoundingClientRect(); tip.style.top = (r.top - wr.top + (pt-20)*(r.height/HGT))+"px";
+    tip.classList.add("on");
+  };
+  const hide = () => { tip.classList.remove("on"); xh.setAttribute("opacity","0"); xm.setAttribute("opacity","0"); xg.setAttribute("opacity","0"); };
+  const idxAt = ev => {
+    const r = el.getBoundingClientRect(), X = (ev.clientX - r.left) * (W / r.width);
+    let bi=null, bd=Infinity; pts.forEach((o,i)=>{ const dd=Math.abs(px(o)-X); if(dd<bd){bd=dd;bi=i;} });
+    return bi;
+  };
+  hostEl.onpointermove = ev => { if(ev.pointerType==="mouse") show(idxAt(ev)); };
+  hostEl.onpointerleave = ev => { if(ev.pointerType==="mouse") hide(); };
+  hostEl.onpointerup = ev => { if(ev.pointerType!=="mouse"){ show(idxAt(ev)); pinned=s.key; } };
+  hostEl.onpointercancel = hide;
+  hostEl.onkeydown = ev => {
+    const n=pts.length; if(!n) return;
+    let i = Math.min(state.sel[s.key] ?? n-1, n-1);
+    if(ev.key==="ArrowLeft") i=Math.max(0,i-1); else if(ev.key==="ArrowRight") i=Math.min(n-1,i+1);
+    else if(ev.key==="Home") i=0; else if(ev.key==="End") i=n-1; else if(ev.key==="Escape"){ hide(); return; } else return;
+    ev.preventDefault(); show(i); $(`#live-${s.key}`).textContent = tip.innerText.replace(/\n/g,". ");
+  };
+  hostEl.onfocus = () => show(Math.min(state.sel[s.key] ?? pts.length-1, pts.length-1));
+  hostEl.onblur = () => { hide(); $(`#live-${s.key}`).textContent=""; };
+}
+let pinned=null;
+document.addEventListener("pointerdown", ev=>{ if(pinned && !ev.target.closest(`#cw-${pinned}`)){ const t=$(`#tip-${pinned}`); t&&t.classList.remove("on"); const x=document.querySelector(`#ch-${pinned} .xh`); x&&x.setAttribute("opacity","0"); pinned=null; } });
+
+function newestT(){ let t=0; for(const s of SPOTS){ const L=latest(state.docs[s.id]); if(L&&L.t>t) t=L.t; } return t; }
+function oldestT(){ let t=Infinity; for(const s of SPOTS){ const L=latest(state.docs[s.id]); if(L) t=Math.min(t,L.t); } return t===Infinity?0:t; }
+function renderStamp(){
+  const st = $("#stamp");
+  if(!state.loaded){ st.textContent = ""; return; }
+  const t = newestT(), o = oldestT();
+  if(!t){ st.textContent = "Todavía no hay lecturas recogidas."; return; }
+  let html = `<span class="dot" aria-hidden="true"></span>Última lectura <b class="mono">${fmtHM.format(t)}</b> · ${ago(t)}. Se recogen solas cada 10 min.`;
+  if(Date.now()-t > 40*60e3) html += `<br><span class="warn">No hay lecturas nuevas desde las ${fmtHM.format(t)}. MeteoGalicia o la recogida automática pueden estar parados.</span>`;
+  else if(o && Date.now()-o > 40*60e3) html += `<br><span class="warn">Alguna estación no envía datos desde las ${fmtHM.format(o)}.</span>`;
+  st.innerHTML = html;
+}
+function say(text, isErr){ const m=$("#msg"); m.textContent=text||""; m.classList.toggle("err",!!isErr); }
+
+/* ---------- data ---------- */
+const sig = d => d ? JSON.stringify([d.u, d.h, d.diez]) : "";
+async function load(manual){
+  if(state.busy) return;
+  state.busy = true; state.lastTry = Date.now();
+  const btn=$("#refresh"); btn.disabled=true; btn.classList.add("busy");
+  if(manual) say("Cargando lecturas…");
+  try{
+    const sep = DATA_URL.includes("?") ? "&" : "?";
+    const r = await fetch(`${DATA_URL}${sep}t=${Math.floor(Date.now()/60e3)}`, {cache:"no-store"});
+    if(r.status===404) throw Object.assign(new Error("Todavía no hay datos recogidos. La primera lectura llega en unos minutos."),{soft:true});
+    if(!r.ok) throw new Error(`No se pudieron cargar las lecturas (error ${r.status}).`);
+    const j = await r.json();
+    const spots = (j && j.spots) || {};
+    let changed = 0;
+    for(const s of SPOTS){ const nd = spots[s.id]; if(nd && sig(nd)!==sig(state.docs[s.id])){ state.docs[s.id]=nd; changed++; } }
+    state.fileAt = j.actualizado || state.fileAt;
+    const first = !state.loaded; state.loaded = true;
+    if(changed || first) renderAll(); else renderStamp();
+    say(manual && !changed ? "No hay lecturas nuevas todavía. MeteoGalicia publica cada 10 minutos." : "");
+  }catch(e){
+    const first = !state.loaded; state.loaded = true;
+    if(first) renderAll();
+    say(e.soft ? e.message : ((e && e.message && /lecturas|datos/.test(e.message)) ? e.message : "No se pudieron cargar las lecturas. Revisa la conexión y pulsa Actualizar."), !e.soft);
+  }finally{ state.busy=false; btn.classList.remove("busy"); btn.disabled=false; }
+}
+
+/* ---------- boot ---------- */
+buildShell();
+$("#refresh").hidden = false;
+$("#refresh").addEventListener("click", ()=>load(true));
+let resizeT, lastW = 0;
+new ResizeObserver(()=>{ const w=document.body.clientWidth; if(Math.abs(w-lastW)<4) return; lastW=w; clearTimeout(resizeT); resizeT=setTimeout(()=>{ for(const s of SPOTS){ const d=state.docs[s.id]; if(d) drawChart(s,d); } },120); }).observe(document.body);
+setInterval(()=>{ if(!state.loaded) return; renderStamp(); if(document.visibilityState==="visible" && Date.now()-state.lastTry >= POLL) load(false); }, 30e3);
+document.addEventListener("visibilitychange", ()=>{ if(document.visibilityState==="visible" && state.loaded && Date.now()-state.lastTry > 60e3) load(false); });
+load(false);
+})();
+</script>
+</body>
+</html>
