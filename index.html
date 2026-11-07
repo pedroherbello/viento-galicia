@@ -17,7 +17,7 @@
   --bg:#EDF1F3; --surface:#F9FBFC; --ink:#0D2131; --muted:#556877; --line:#D2DBE1; --grid:#E3E9ED;
   --accent:#D8501C; --accent-ink:#FFFFFF;
   --b0:#8494A0;
-  --meanc:#1E5E9A; --gust:#D8501C; --warn:#9A5B00; --ok:#1F8A55;
+  --meanc:#1E5E9A; --gust:#D8501C; --ga-op:.14; --warn:#9A5B00; --ok:#1F8A55;
   --f-display:"Big Shoulders Display","Arial Narrow","Roboto Condensed",sans-serif;
   --f-body:"Atkinson Hyperlegible",system-ui,-apple-system,"Segoe UI",sans-serif;
   --f-mono:"IBM Plex Mono",ui-monospace,"SFMono-Regular",Menlo,monospace;
@@ -27,12 +27,12 @@
   --bg:#09141D; --surface:#0F1F2B; --ink:#E4ECF1; --muted:#8EA2B1; --line:#1E3343; --grid:#172A3A;
   --accent:#FF7A3F; --accent-ink:#1A0A02;
   --b0:#56697A;
-  --meanc:#7DB8E8; --gust:#FF7A3F; --warn:#F0B35A; --ok:#4FD08F; color-scheme:dark}}
+  --meanc:#7DB8E8; --gust:#FF7A3F; --ga-op:.22; --warn:#F0B35A; --ok:#4FD08F; color-scheme:dark}}
 :root[data-theme="dark"]{
   --bg:#09141D; --surface:#0F1F2B; --ink:#E4ECF1; --muted:#8EA2B1; --line:#1E3343; --grid:#172A3A;
   --accent:#FF7A3F; --accent-ink:#1A0A02;
   --b0:#56697A;
-  --meanc:#7DB8E8; --gust:#FF7A3F; --warn:#F0B35A; --ok:#4FD08F; color-scheme:dark}
+  --meanc:#7DB8E8; --gust:#FF7A3F; --ga-op:.22; --warn:#F0B35A; --ok:#4FD08F; color-scheme:dark}
 *{box-sizing:border-box}
 [hidden]{display:none!important}
 html{scroll-behavior:smooth}
@@ -123,12 +123,13 @@ svg.chart .day{fill:var(--ink);font-weight:500}
 svg.chart .ref{stroke:var(--muted);stroke-dasharray:4 4;stroke-opacity:.7}
 svg.chart .hb{fill:var(--b0);fill-opacity:.32}
 svg.chart .ma{fill:var(--meanc);fill-opacity:.16;stroke:none}
+svg.chart .ga{fill:var(--gust);fill-opacity:var(--ga-op);stroke:none}
 svg.chart .ml{fill:none;stroke:var(--meanc);stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
 svg.chart .gl{fill:none;stroke:var(--gust);stroke-width:1.6;stroke-linejoin:round;stroke-linecap:round}
 svg.chart .md,svg.chart .xm{fill:var(--meanc);stroke:var(--surface);stroke-width:2}
 svg.chart .gd,svg.chart .xg{fill:var(--gust);stroke:var(--surface);stroke-width:2}
 svg.chart.intro .ml,svg.chart.intro .gl{stroke-dasharray:1 0;animation:draw 1.4s cubic-bezier(.3,.7,.2,1) backwards}
-svg.chart.intro .ma{animation:fade 1.2s .3s both}
+svg.chart.intro .ma,svg.chart.intro .ga{animation:fade 1.2s .3s both}
 @keyframes draw{from{stroke-dasharray:0 1}to{stroke-dasharray:1 0}}
 @keyframes fade{from{opacity:0}}
 .sw.l{height:3px;border-radius:2px;width:16px;vertical-align:3px}
@@ -166,7 +167,7 @@ footer p{margin:0;max-width:80ch}
   .nm .f,.lb .f{display:none}.nm .s,.lb .s{display:inline}
   .card .flag{font-size:9.5px;right:6px;padding:1px 6px}
 }
-@media (prefers-reduced-motion:reduce){.needle{transition:none}.btn.busy svg{animation:none}svg.chart.intro .ml,svg.chart.intro .gl,svg.chart.intro .ma{animation:none}}
+@media (prefers-reduced-motion:reduce){.needle{transition:none}.btn.busy svg{animation:none}svg.chart.intro .ml,svg.chart.intro .gl,svg.chart.intro .ma,svg.chart.intro .ga{animation:none}}
 </style>
 
 </head>
@@ -425,6 +426,13 @@ function drawChart(s, doc){
   const base = pt+ih;
   for(const r of runs){
     const mv = r.filter(o=>o.v!=null), gv = r.filter(o=>o.g!=null);
+    // soft red band between the mean line and the gust line (readings that have both)
+    const bv = r.filter(o=>o.v!=null && o.g!=null);
+    if(bv.length>1){
+      const top = bv.map((o,i)=>`${i?"L":"M"}${x(o.t).toFixed(1)} ${y(Math.max(o.g,o.v)).toFixed(1)}`).join(" ");
+      const bot = bv.slice().reverse().map(o=>`L${x(o.t).toFixed(1)} ${y(o.v).toFixed(1)}`).join(" ");
+      g+=`<path class="ga" d="${top} ${bot} Z"/>`;
+    }
     if(mv.length>1){
       const line = mv.map((o,i)=>`${i?"L":"M"}${x(o.t).toFixed(1)} ${y(o.v).toFixed(1)}`).join(" ");
       g+=`<path class="ma" d="${line} L${x(mv[mv.length-1].t).toFixed(1)} ${base} L${x(mv[0].t).toFixed(1)} ${base} Z"/>`;
