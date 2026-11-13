@@ -276,12 +276,12 @@ function buildShell(){
         </div>
       </div>
       <div class="chart-wrap" id="cw-${s.key}">
-        <div class="chart-title"><h3><span id="rg-${s.key}">Últimas 48 h</span> <span class="subt" id="sub-${s.key}">· hora peninsular</span></h3>
-          <div class="zoom" role="group" aria-label="Rango de las gráficas">${PRESETS.map(h=>`<button type="button" data-h="${h}" aria-pressed="${h===48}">${h} h</button>`).join("")}</div></div>
+        <div class="chart-title"><h3><span id="rg-${s.key}">Últimas 12 h</span> <span class="subt" id="sub-${s.key}">· hora peninsular</span></h3>
+          <div class="zoom" role="group" aria-label="Rango de las gráficas">${PRESETS.map(h=>`<button type="button" data-h="${h}" aria-pressed="${h===12}">${h} h</button>`).join("")}</div></div>
         <div class="legend" id="lg-${s.key}" aria-hidden="true"></div>
         <div class="empty" id="ch-${s.key}">Cargando lecturas…</div>
         <div class="tip" id="tip-${s.key}" aria-hidden="true"></div>
-        <p class="hint" aria-hidden="true"${s.key===SPOTS[0].key?"":" hidden"}><span class="m">Ctrl + rueda o pellizca en el trackpad para ampliar · arrastra para moverte · doble clic: 48 h</span><span class="t">Pellizca para ampliar · desliza en horizontal para moverte · doble toque: 48 h</span></p>
+        <p class="hint" aria-hidden="true"${s.key===SPOTS[0].key?"":" hidden"}><span class="m">Ctrl + rueda o pellizca en el trackpad para ampliar · arrastra para moverte · doble clic: 12 h</span><span class="t">Pellizca para ampliar · desliza en horizontal para moverte · doble toque: 12 h</span></p>
         <p class="chart-live" id="live-${s.key}" aria-live="polite"></p>
         <p class="sr" id="sum-${s.key}"></p>
       </div>
@@ -394,7 +394,8 @@ function nearestRot(el, d){ const cur = parseFloat(el.style.getPropertyValue("--
 
 /* ---------- chart window (zoom + pan), shared by the three charts ---------- */
 const ZMIN = 2*3600e3, ZMAX = 48*3600e3, PRESETS = [48,24,12,6];
-const view = { span: ZMAX, end: null };   // end null = follow the latest reading
+const ZDEF = 12*3600e3;                    // default window
+const view = { span: ZDEF, end: null };   // end null = follow the latest reading
 const geo = {};                             // per chart: geometry + tooltip helpers of the last draw
 let redrawQ = 0, restT = 0;
 const onScreen = new Set(SPOTS.map(s=>s.key));
@@ -438,12 +439,12 @@ function zoomAt(factor, tAnchor){
   setView(span, tAnchor - frac*span + span);
 }
 function syncZoomUI(){
-  const full = view.span>=ZMAX && view.end==null;
+  const full = view.span>=ZMAX && view.end==null, hrs = view.span/3600e3;
   document.querySelectorAll(".zoom button").forEach(b=>b.setAttribute("aria-pressed", String(Math.abs(view.span - (+b.dataset.h)*3600e3) < 60e3)));
   document.querySelectorAll(".plot").forEach(p=>p.classList.toggle("zoomed", !full));
   const w = windowNow();
   const same = fmtDay.format(w.start)===fmtDay.format(w.end);
-  const label = full ? "Últimas 48 h"
+  const label = view.end==null && Math.abs(hrs-Math.round(hrs))<0.02 ? `Últimas ${Math.round(hrs)} h`
     : `${fmtDay.format(w.start)} ${fmtHM.format(w.start)} – ${same?"":fmtDay.format(w.end)+" "}${fmtHM.format(w.end)}`;
   for(const s of SPOTS){ const el=$(`#rg-${s.key}`); if(el) el.textContent = label; }
 }
@@ -505,20 +506,41 @@ function drawChart(s, doc){
   for(const o of visM){ if(run.length && o.t-run[run.length-1].t>25*60e3){ runs.push(run); run=[]; } run.push(o); }
   if(run.length) runs.push(run);
   const dotR = hourW >= 60 ? 1 : 0;   // show every reading as a small dot when zoomed in
+  // Monotone cubic interpolation (Fritsch–Carlson, as d3.curveMonotoneX): smooth curves that
+  // pass through every reading without inventing peaks or dips between them.
+  const curve = (P, first) => {
+    const n = P.length; if(n < 2) return "";
+    const f = v => v.toFixed(1);
+    let out = `${first} ${f(P[0][0])} ${f(P[0][1])}`;
+    if(n === 2) return out + ` L${f(P[1][0])} ${f(P[1][1])}`;
+    const h = [], sl = [], t = new Array(n);
+    for(let i=0;i<n-1;i++){ h[i] = P[i+1][0]-P[i][0]; sl[i] = h[i] ? (P[i+1][1]-P[i][1])/h[i] : 0; }
+    t[0] = sl[0]; t[n-1] = sl[n-2];
+    for(let i=1;i<n-1;i++){
+      if(sl[i-1]*sl[i] <= 0){ t[i] = 0; continue; }
+      const p = (sl[i-1]*h[i] + sl[i]*h[i-1]) / (h[i-1]+h[i]);
+      t[i] = (Math.sign(sl[i-1])+Math.sign(sl[i])) * Math.min(Math.abs(sl[i-1]), Math.abs(sl[i]), 0.5*Math.abs(p));
+    }
+    for(let i=0;i<n-1;i++){
+      const dx = h[i]/3;
+      out += ` C${f(P[i][0]+dx)} ${f(P[i][1]+t[i]*dx)} ${f(P[i+1][0]-dx)} ${f(P[i+1][1]-t[i+1]*dx)} ${f(P[i+1][0])} ${f(P[i+1][1])}`;
+    }
+    return out;
+  };
   for(const r of runs){
     const mv = r.filter(o=>o.v!=null), gv = r.filter(o=>o.g!=null);
     const bv = r.filter(o=>o.v!=null && o.g!=null);
     if(bv.length>1){
-      const top = bv.map((o,i)=>`${i?"L":"M"}${x(o.t).toFixed(1)} ${y(Math.max(o.g,o.v)).toFixed(1)}`).join(" ");
-      const bot = bv.slice().reverse().map(o=>`L${x(o.t).toFixed(1)} ${y(o.v).toFixed(1)}`).join(" ");
+      const top = curve(bv.map(o=>[x(o.t), y(Math.max(o.g,o.v))]), "M");
+      const bot = curve(bv.slice().reverse().map(o=>[x(o.t), y(o.v)]), "L");
       d+=`<path class="ga" d="${top} ${bot} Z"/>`;
     }
     if(mv.length>1){
-      const line = mv.map((o,i)=>`${i?"L":"M"}${x(o.t).toFixed(1)} ${y(o.v).toFixed(1)}`).join(" ");
+      const line = curve(mv.map(o=>[x(o.t), y(o.v)]), "M");
       d+=`<path class="ma" d="${line} L${x(mv[mv.length-1].t).toFixed(1)} ${base} L${x(mv[0].t).toFixed(1)} ${base} Z"/>`;
       d+=`<path class="ml" pathLength="1" d="${line}"/>`;
     }
-    if(gv.length>1) d+=`<path class="gl" pathLength="1" d="${gv.map((o,i)=>`${i?"L":"M"}${x(o.t).toFixed(1)} ${y(o.g).toFixed(1)}`).join(" ")}"/>`;
+    if(gv.length>1) d+=`<path class="gl" pathLength="1" d="${curve(gv.map(o=>[x(o.t), y(o.g)]), "M")}"/>`;
     if(r.length<=2 || dotR){ for(const o of r){
       if(o.v!=null) d+=`<circle class="md" cx="${x(o.t).toFixed(1)}" cy="${y(o.v).toFixed(1)}" r="${r.length<=2?3.5:2.6}"/>`;
       if(o.g!=null) d+=`<circle class="gd" cx="${x(o.t).toFixed(1)}" cy="${y(o.g).toFixed(1)}" r="${r.length<=2?3:2.2}"/>`; } }
@@ -556,7 +578,7 @@ function drawChart(s, doc){
     + (yMax>=12?`<span><span class="sw l dash"></span>12 kn, planeo</span>`:"");
   hostEl.className = "plot" + ((view.span<ZMAX || view.end!=null) ? " zoomed" : ""); hostEl.tabIndex=0;
   hostEl.setAttribute("role","group");
-  hostEl.setAttribute("aria-label",`Gráfica de ${s.name}. Flechas: recorrer lecturas. Más y menos: ampliar o reducir. Cero: ver 48 horas.`);
+  hostEl.setAttribute("aria-label",`Gráfica de ${s.name}. Flechas: recorrer lecturas. Más y menos: ampliar o reducir. Cero: volver a las últimas 12 horas.`);
   hostEl.innerHTML = `<svg class="chart${intro?" intro":""}" viewBox="0 0 ${W} ${HGT}" width="${W}" height="${HGT}" aria-hidden="true">${g}</svg>`;
   const topG = [...allM, ...allH].filter(o=>o.g!=null).reduce((a,b)=>!a||b.g>a.g?b:a,null);
   sum.textContent = topG ? `Racha máxima en 48 horas: ${r0(topG.g)} nudos, ${fmtDay.format(topG.t)} a las ${fmtHM.format(topG.t)}, del ${CARD_LONG[cardinal(topG.d)]||"–"}.` : "";
@@ -651,7 +673,7 @@ function attachChart(s){
     if(!g || ev.type==="pointercancel") return;
     if(wasTap && ev.pointerType!=="mouse"){
       const now = Date.now();
-      if(now-lastTap < 320){ lastTap = 0; setView(ZMAX, null); return; }
+      if(now-lastTap < 320){ lastTap = 0; setView(ZDEF, null); return; }
       lastTap = now;
       g.show(g.idxAt(ev.clientX)); pinned = s.key;
     }
@@ -661,7 +683,7 @@ function attachChart(s){
   window.addEventListener("pointercancel", ev => { if(ptrs.has(ev.pointerId)){ ptrs.delete(ev.pointerId); if(ptrs.size<2) pinch=null; if(!ptrs.size){ drag=null; hostEl.classList.remove("panning"); } } });
   hostEl.addEventListener("pointercancel", ev => { end(ev); const g=G(); g && g.hide(); });
   hostEl.addEventListener("pointerleave", ev => { if(ev.pointerType==="mouse" && !(drag && drag.panning)){ const g=G(); g && g.hide(); } });
-  hostEl.addEventListener("dblclick", ev => { ev.preventDefault(); setView(ZMAX, null); });
+  hostEl.addEventListener("dblclick", ev => { ev.preventDefault(); setView(ZDEF, null); });
   hostEl.addEventListener("wheel", ev => {
     const g = G(); if(!g) return;
     const k = ev.deltaMode===1 ? 16 : ev.deltaMode===2 ? 400 : 1;
@@ -687,7 +709,7 @@ function attachChart(s){
     const anchor = () => { const w = windowNow(); return view.end==null ? w.end : w.start + w.span/2; };
     if(k==="+" || k==="="){ ev.preventDefault(); zoomAt(0.5, anchor()); live("Gráficas ampliadas"); return; }
     if(k==="-" || k==="_"){ ev.preventDefault(); zoomAt(2, anchor()); live("Gráficas reducidas"); return; }
-    if(k==="0"){ ev.preventDefault(); setView(ZMAX, null); live("Últimas 48 horas"); return; }
+    if(k==="0"){ ev.preventDefault(); setView(ZDEF, null); live("Últimas 12 horas"); return; }
     const n = g.n; if(!n) return;
     const st = state.selT && state.selT[s.key], w = windowNow();
     let i = (st!=null && st>=w.start && st<=w.end) ? g.idxOfT(st) : n-1;
