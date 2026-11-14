@@ -276,12 +276,12 @@ function buildShell(){
         </div>
       </div>
       <div class="chart-wrap" id="cw-${s.key}">
-        <div class="chart-title"><h3><span id="rg-${s.key}">Últimas 12 h</span> <span class="subt" id="sub-${s.key}">· hora peninsular</span></h3>
-          <div class="zoom" role="group" aria-label="Rango de las gráficas">${PRESETS.map(h=>`<button type="button" data-h="${h}" aria-pressed="${h===12}">${h} h</button>`).join("")}</div></div>
+        <div class="chart-title"><h3><span id="rg-${s.key}">Últimas ${DEF_H} h</span> <span class="subt" id="sub-${s.key}">· hora peninsular</span></h3>
+          <div class="zoom" role="group" aria-label="Rango de las gráficas">${PRESETS.map(h=>`<button type="button" data-h="${h}" aria-pressed="${h===DEF_H}">${h} h</button>`).join("")}</div></div>
         <div class="legend" id="lg-${s.key}" aria-hidden="true"></div>
         <div class="empty" id="ch-${s.key}">Cargando lecturas…</div>
         <div class="tip" id="tip-${s.key}" aria-hidden="true"></div>
-        <p class="hint" aria-hidden="true"${s.key===SPOTS[0].key?"":" hidden"}><span class="m">Ctrl + rueda o pellizca en el trackpad para ampliar · arrastra para moverte · doble clic: 12 h</span><span class="t">Pellizca para ampliar · desliza en horizontal para moverte · doble toque: 12 h</span></p>
+        <p class="hint" aria-hidden="true"${s.key===SPOTS[0].key?"":" hidden"}><span class="m">Ctrl + rueda o pellizca en el trackpad para ampliar · arrastra para moverte · doble clic: ${DEF_H} h</span><span class="t">Pellizca para ampliar · desliza en horizontal para moverte · doble toque: ${DEF_H} h</span></p>
         <p class="chart-live" id="live-${s.key}" aria-live="polite"></p>
         <p class="sr" id="sum-${s.key}"></p>
       </div>
@@ -394,7 +394,8 @@ function nearestRot(el, d){ const cur = parseFloat(el.style.getPropertyValue("--
 
 /* ---------- chart window (zoom + pan), shared by the three charts ---------- */
 const ZMIN = 2*3600e3, ZMAX = 48*3600e3, PRESETS = [48,24,12,6];
-const ZDEF = 12*3600e3;                    // default window
+const DEF_H = 48;                          // vista por defecto, en horas: es lo único que hay que cambiar
+const ZDEF = DEF_H*3600e3;
 const view = { span: ZDEF, end: null };   // end null = follow the latest reading
 const geo = {};                             // per chart: geometry + tooltip helpers of the last draw
 let redrawQ = 0, restT = 0;
@@ -578,7 +579,7 @@ function drawChart(s, doc){
     + (yMax>=12?`<span><span class="sw l dash"></span>12 kn, planeo</span>`:"");
   hostEl.className = "plot" + ((view.span<ZMAX || view.end!=null) ? " zoomed" : ""); hostEl.tabIndex=0;
   hostEl.setAttribute("role","group");
-  hostEl.setAttribute("aria-label",`Gráfica de ${s.name}. Flechas: recorrer lecturas. Más y menos: ampliar o reducir. Cero: volver a las últimas 12 horas.`);
+  hostEl.setAttribute("aria-label",`Gráfica de ${s.name}. Flechas: recorrer lecturas. Más y menos: ampliar o reducir. Cero: volver a las últimas ${DEF_H} horas.`);
   hostEl.innerHTML = `<svg class="chart${intro?" intro":""}" viewBox="0 0 ${W} ${HGT}" width="${W}" height="${HGT}" aria-hidden="true">${g}</svg>`;
   const topG = [...allM, ...allH].filter(o=>o.g!=null).reduce((a,b)=>!a||b.g>a.g?b:a,null);
   sum.textContent = topG ? `Racha máxima en 48 horas: ${r0(topG.g)} nudos, ${fmtDay.format(topG.t)} a las ${fmtHM.format(topG.t)}, del ${CARD_LONG[cardinal(topG.d)]||"–"}.` : "";
@@ -709,7 +710,7 @@ function attachChart(s){
     const anchor = () => { const w = windowNow(); return view.end==null ? w.end : w.start + w.span/2; };
     if(k==="+" || k==="="){ ev.preventDefault(); zoomAt(0.5, anchor()); live("Gráficas ampliadas"); return; }
     if(k==="-" || k==="_"){ ev.preventDefault(); zoomAt(2, anchor()); live("Gráficas reducidas"); return; }
-    if(k==="0"){ ev.preventDefault(); setView(ZDEF, null); live("Últimas 12 horas"); return; }
+    if(k==="0"){ ev.preventDefault(); setView(ZDEF, null); live(`Últimas ${DEF_H} horas`); return; }
     const n = g.n; if(!n) return;
     const st = state.selT && state.selT[s.key], w = windowNow();
     let i = (st!=null && st>=w.start && st<=w.end) ? g.idxOfT(st) : n-1;
