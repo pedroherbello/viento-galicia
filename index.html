@@ -457,8 +457,9 @@ function drawChart(s, doc){
   if(!H.length && !M.length){ hostEl.className="empty"; hostEl.textContent="Sin datos para esta estación."; sum.textContent=""; geo[s.key]=null; return; }
   const W = Math.max(280, Math.round(wrap.clientWidth || 600));
   const narrow = W < 520;
-  const HGT = narrow ? 230 : 270;
   const pl = 28, pr = 6, pt = narrow ? 28 : 32, pb = 34;
+  const PLOT_H = narrow ? 185 : 224;          // alto de la zona de datos (eje vertical), en px
+  const HGT = pt + PLOT_H + pb;
   const iw = W-pl-pr, ih = HGT-pt-pb, base = pt+ih;
   const w = windowNow(), tMin = w.start, tMax = w.end, span = w.span;
   // whole 48 h: decide which hours fall back to the hourly gust bar
