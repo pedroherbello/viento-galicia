@@ -1,0 +1,35 @@
+name: Sondeo MeteoGalicia (temporal)
+on:
+  push:
+    branches: [probe]
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Probar servicios
+        run: |
+          B=https://servizos.meteogalicia.gal/mgrss/observacion
+          D="dataIni=20/11/2026%2002:30"
+          for p in \
+            "datos10minEstacionsMeteo.action?idEst=14000&$D&numHoras=1" \
+            "datos10minEstacions.action?idEst=14000&$D&numHoras=1" \
+            "datosDezminutaisEstacions.action?idEst=14000&$D&numHoras=1" \
+            "datos10minutaisEstacions.action?idEst=14000&$D&numHoras=1" \
+            "dezminutaisEstacions.action?idEst=14000&$D&numHoras=1" \
+            "ultimos10minEstacionsMeteo.action?idEst=14000&$D&numHoras=1" \
+            "ultimos10minEstacionsMeteo.action?idEst=14000&numHoras=3" \
+            "datosHorariosEstacions.action?idEst=14000&dataIni=20/11/2026%2002:00&numHoras=3" ; do
+            code=$(curl -s -o out.txt -w "%{http_code}" "$B/$p")
+            echo "### $code $(wc -c < out.txt) bytes  $p"
+            head -c 700 out.txt | tr '\n' ' '; echo; echo
+          done
+          echo "### codigos de viento en el horario histórico (14000, 02:00-05:00 UTC):"
+          curl -s "$B/datosHorariosEstacions.action?idEst=14000&dataIni=20/11/2026%2002:00&numHoras=3" | python3 -c "
+          import json,sys
+          j=json.load(sys.stdin)
+          for k,v in j.items():
+            for e in v:
+              for i in e.get('listaInstantes',[]):
+                print(i.get('instanteLecturaUTC'), [(m['codigoParametro'],m['valor'],m['lnCodigoValidacion']) for m in i['listaMedidas'] if m['codigoParametro'].startswith(('VV','DV'))])
+          " || true
